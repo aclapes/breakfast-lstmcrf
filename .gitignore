@@ -1,0 +1,56 @@
+*.meta
+*.data*
+*.index
+*.out
+*.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IPython Notebook
+.ipynb_checkpoints
+
+# Deployment Config
+.remote-sync.json
+
+# Images and videos
+*.avi
+*.mp4
+*.gif
+*.h5
+*.hdf5
+*.log
+
+*/tmp/*
+*/logs/*
+config.py
+
+.DS_Store
+.isort.cfg
+
+venv
+
+.idea/
