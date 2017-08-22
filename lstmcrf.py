@@ -474,7 +474,7 @@ if __name__ == '__main__':
         '--input-file',
         type=str,
         dest='input_file',
-        default='/datasets/breakfast/fv/s1/dataset.h5',
+        default='/data/datasets/breakfast/fv/s1/dataset.h5',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -510,7 +510,7 @@ if __name__ == '__main__':
         '--hidden-size',
         type=int,
         dest='hidden_size',
-        default=128,
+        default=512,
         help=
         'Hidden size (default: %(default)s)')
 
@@ -523,19 +523,12 @@ if __name__ == '__main__':
         help=
         'Dropout probability (default: %(default)s)')
 
-    # parser.add_argument(
-    #     '-t',
-    #     '--step-size',
-    #     type=int,
-    #     dest='step_size',
-    #     help=
-    #     'Step size (default: %(default)s)')
-
     parser.add_argument(
         '-ot',
         '--optimizer-type',
-        type=int,
+        type=str,
         dest='optimizer_type',
+        default='adam',
         help=
         'Optimizer type (sgd or adam) (default: %(default)s)')
 
