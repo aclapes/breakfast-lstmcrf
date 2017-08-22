@@ -117,6 +117,9 @@ class SimpleLstmCrfModel(object):
                 self.log_likelihood, self.transition_params = crf.crf_log_likelihood(
                     self.unary_scores, self.y_batch, self.lengths_batch)
                 # Add a training op to tune the parameters.
+
+                self.decoding = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
+
                 self.loss = tf.reduce_mean(-self.log_likelihood)
 
                 # self.apply_placeholder_op = tf.train.AdamOptimizer(learning_rate=self.learn_rate).minimize(self.loss)
@@ -154,7 +157,7 @@ class SimpleLstmCrfModel(object):
 
                 progbar = ProgressBar(max_value=self.x.shape[0] // self.batch_size)
                 num_train_batches = 0
-                train_acc = 0.
+                train_loss = train_acc = 0.
                 while True:
                     try:
                         batch = self.train_reader.next()
@@ -163,10 +166,11 @@ class SimpleLstmCrfModel(object):
                         break
 
                     # Run forward and backward (backprop)
-                    loss, unary_scores_batch, transition_params, _, init_state = session.run(
+                    loss, unary_scores_batch, transition_params, decoding, _, init_state = session.run(
                         [self.loss,
                          self.unary_scores,
                          self.transition_params,
+                         self.decoding,
                          self.apply_placeholder_op,
                          self.rnn_state],
                         feed_dict = {
@@ -188,7 +192,8 @@ class SimpleLstmCrfModel(object):
 
                     # Print info
                     progbar.update(num_train_batches)
-                    print(', loss: %.2f, acc: %.2f%%' % (loss, acc))
+                    # print(', loss: %.2f, acc: %.2f%%' % (loss, acc))
+                    train_loss += loss
                     train_acc += acc
                     num_train_batches += 1
                 progbar.finish()
@@ -201,7 +206,7 @@ class SimpleLstmCrfModel(object):
                 init_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
 
                 num_val_batches = 0
-                val_acc = 0.
+                val_loss = val_acc = 0.
                 while True:
                     try:
                         batch = self.val_reader.next()
@@ -223,12 +228,18 @@ class SimpleLstmCrfModel(object):
                         correct_labels += np.sum(np.equal(pred, y_true[:length]))
                         total_labels += length
                     acc = 100. * correct_labels / float(total_labels)
+                    val_loss += loss
                     val_acc += acc
                     num_val_batches += 1
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
-                    'train acc: %.2f%%, val acc: %.2f%%' % (train_acc/num_train_batches, val_acc/num_val_batches)
+                    'TRAIN (loss/acc): %.6f%%/%.2f%%, VAL (loss/acc): %.6f%%/%.2f%%' % (
+                        train_loss/num_train_batches,
+                        train_acc/num_train_batches,
+                        val_loss/num_val_batches,
+                        val_acc/num_val_batches
+                    )
                 )
 
                 if e % 2 == 0:
