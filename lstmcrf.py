@@ -20,7 +20,7 @@ from src.data import import_labels, to_categorical
 
 # Data settings.
 num_examples = 32
-step_size = 20
+# step_size = 20
 # num_features = 4096
 num_tags = 48
 hidden_size = 512
@@ -91,7 +91,7 @@ class SimpleLstmCrfModel(object):
                 self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
                 cell = rnn.BasicLSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
-                # cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=0.9)  # TODO: check this
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-self.drop_prob)  # TODO: check this
                 rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
                     cell,
                     self.x_drop,
@@ -100,10 +100,10 @@ class SimpleLstmCrfModel(object):
                     sequence_length=self.lengths_batch  # do not process padded parts
                 )
 
-                outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
+                # outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
 
                 # Compute unary scores from a linear layer.
-                output = tf.reshape(outputs_dropout, [-1, self.hidden_size])
+                output = tf.reshape(rnn_outputs, [-1, self.hidden_size])
                 softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
                 softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
                 logits = tf.matmul(output, softmax_w) + softmax_b
@@ -118,7 +118,7 @@ class SimpleLstmCrfModel(object):
                     self.unary_scores, self.y_batch, self.lengths_batch)
                 # Add a training op to tune the parameters.
 
-                self.decoding = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
+                self.decoding, _ = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
 
                 self.loss = tf.reduce_mean(-self.log_likelihood)
 
@@ -140,8 +140,8 @@ class SimpleLstmCrfModel(object):
                 regularized_loss = self.loss + regularization_penalty
                 self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
 
-                self.saver = tf.train.Saver()
-                self.init_op = tf.global_variables_initializer()  # always session.run this op first!
+            self.saver = tf.train.Saver()
+            self.init_op = tf.global_variables_initializer()  # always session.run this op first!
 
     def run(self):
         with tf.Session(graph=self.graph) as session:
@@ -182,11 +182,11 @@ class SimpleLstmCrfModel(object):
                     # Get frame-wise using viterbi decoding
                     correct_labels = total_labels = 0.
                     # Iterate over sequences in a batch
-                    for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
+                    for y_pred, y_true, length in zip(decoding, batch[1], batch_lengths):
                         # Decode the sequence
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        # pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
                         # Count per-timestep hits
-                        correct_labels += np.sum(np.equal(pred, y_true[:length]))
+                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
                         total_labels += length
                     acc = 100. * correct_labels / float(total_labels)
 
@@ -234,7 +234,7 @@ class SimpleLstmCrfModel(object):
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
-                    'TRAIN (loss/acc): %.6f%%/%.2f%%, VAL (loss/acc): %.6f%%/%.2f%%' % (
+                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
                         train_loss/num_train_batches,
                         train_acc/num_train_batches,
                         val_loss/num_val_batches,
@@ -293,20 +293,18 @@ class SimpleLstmModel(object):
                 # self.lrate = tf.placeholder(tf.float32, shape=[])
 
                 self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-
-                self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)
+                self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0) # TODO: experiemnt with this one
 
                 cell = rnn.LSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
-                # cell = tf.contrib.DropoutWrapper(cell, output_keep_prob=0.9)
-                # cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=0.9)
-                # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=(1-self.drop_prob))
 
                 self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+                # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
 
                 # Obtain the idx-th from num_steps chunks of length step_size
                 rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
                     cell,
-                    self.x_batch,
+                    self.x_drop,
                     dtype=tf.float32,
                     initial_state=self.init_state_tuple, # statefull rnn
                     sequence_length=self.lengths_batch  # do not process padded parts
@@ -344,8 +342,8 @@ class SimpleLstmModel(object):
                 self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
                 self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
 
-                self.saver = tf.train.Saver()
-                self.init_op = tf.global_variables_initializer()  # always session.run this op first!
+            self.saver = tf.train.Saver()
+            self.init_op = tf.global_variables_initializer()  # always session.run this op first!
 
     def run(self):
         with tf.Session(graph=self.graph) as session:
@@ -359,6 +357,7 @@ class SimpleLstmModel(object):
                 )
 
                 num_train_batches = self.x.shape[0] // self.batch_size
+                train_batch_loss = [None] * num_train_batches
                 train_batch_accs = [None] * num_train_batches
 
                 stateful_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
@@ -368,7 +367,7 @@ class SimpleLstmModel(object):
                     batch = self.train_reader.next()
 
                     # Run forward and backward (backprop)
-                    loss, pred, _, stateful_state = session.run(
+                    train_batch_loss[b], pred, _, stateful_state = session.run(
                         [self.loss, self.pred, self.apply_placeholder_op, self.rnn_state],
                         feed_dict = {
                             self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
@@ -385,13 +384,13 @@ class SimpleLstmModel(object):
                         total_labels += length
                     train_batch_accs[b] = 100. * correct_labels / float(total_labels)
                     progbar.update(b)
-                    print(', loss: %.2f, acc: %.2f%%' % (loss, train_batch_accs[b]))
                 progbar.finish()
 
                 # Validation
                 self.val_reader = read_data_generator(self.x_val, self.y_val, self.lengths_val, batch_size=self.batch_size)
                 num_val_batches = self.x_val.shape[0] // self.batch_size
                 val_batch_accs = [None] * num_val_batches
+                val_batch_loss = [None] * num_val_batches
 
                 init_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
 
@@ -400,7 +399,7 @@ class SimpleLstmModel(object):
                     batch = self.val_reader.next()
 
                     # Run forward, but not backprop
-                    loss, pred = session.run(
+                    val_batch_loss[b], pred = session.run(
                         [self.loss, self.pred],
                         feed_dict = {
                             self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
@@ -419,7 +418,12 @@ class SimpleLstmModel(object):
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
-                    'train acc: %.2f%%, val acc: %.2f%%' % (np.mean(train_batch_accs), np.mean(val_batch_accs))
+                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
+                        np.mean(train_batch_loss),
+                        np.mean(train_batch_accs),
+                        np.mean(val_batch_loss),
+                        np.mean(val_batch_accs)
+                    )
                 )
 
                 if e % 2 == 0:
@@ -519,13 +523,13 @@ if __name__ == '__main__':
         help=
         'Dropout probability (default: %(default)s)')
 
-    parser.add_argument(
-        '-t',
-        '--step-size',
-        type=int,
-        dest='step_size',
-        help=
-        'Step size (default: %(default)s)')
+    # parser.add_argument(
+    #     '-t',
+    #     '--step-size',
+    #     type=int,
+    #     dest='step_size',
+    #     help=
+    #     'Step size (default: %(default)s)')
 
     parser.add_argument(
         '-ot',
