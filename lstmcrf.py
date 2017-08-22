@@ -69,76 +69,76 @@ class SimpleLstmCrfModel(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            with tf.device(device_name):
-                # x = features, y = labels in one-hot encoding, and w = binary mask of valid timesteps
-                self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
-                self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
-                self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
+            # with tf.device(device_name):
+            # x = features, y = labels in one-hot encoding, and w = binary mask of valid timesteps
+            self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
+            self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
+            self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
 
-                # lstm state from previous iterations (stateful lstm)
-                self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
+            # lstm state from previous iterations (stateful lstm)
+            self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
 
-                self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-                self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+            self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-                # set the statefulness (if it weren't check other instruction)
-                # </--
-                self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
-                # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
-                # ---/>
+            # set the statefulness (if it weren't check other instruction)
+            # </--
+            self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+            # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            # ---/>
 
-                # get sequences length from binary mask of valid timesteps
-                self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+            # get sequences length from binary mask of valid timesteps
+            self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
-                cell = rnn.BasicLSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
-                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-self.drop_prob)  # TODO: check this
-                rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
-                    cell,
-                    self.x_drop,
-                    dtype=tf.float32,
-                    initial_state=self.init_state_tuple, # statefull rnn
-                    sequence_length=self.lengths_batch  # do not process padded parts
-                )
+            cell = rnn.BasicLSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
+            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-self.drop_prob)  # TODO: check this
+            rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
+                cell,
+                self.x_drop,
+                dtype=tf.float32,
+                initial_state=self.init_state_tuple, # statefull rnn
+                sequence_length=self.lengths_batch  # do not process padded parts
+            )
 
-                # outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
+            # outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
 
-                # Compute unary scores from a linear layer.
-                output = tf.reshape(rnn_outputs, [-1, self.hidden_size])
-                softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
-                softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
-                logits = tf.matmul(output, softmax_w) + softmax_b
+            # Compute unary scores from a linear layer.
+            output = tf.reshape(rnn_outputs, [-1, self.hidden_size])
+            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
+            logits = tf.matmul(output, softmax_w) + softmax_b
 
-                logits = tf.nn.softmax(logits)
+            logits = tf.nn.softmax(logits)
 
-                self.unary_scores = tf.reshape(logits, [self.batch_size, self.num_words, num_tags])
+            self.unary_scores = tf.reshape(logits, [self.batch_size, self.num_words, num_tags])
 
-                # Compute the log-likelihood of the gold sequences and keep the transition
-                # params for inference at test time.
-                self.log_likelihood, self.transition_params = crf.crf_log_likelihood(
-                    self.unary_scores, self.y_batch, self.lengths_batch)
-                # Add a training op to tune the parameters.
+            # Compute the log-likelihood of the gold sequences and keep the transition
+            # params for inference at test time.
+            self.log_likelihood, self.transition_params = crf.crf_log_likelihood(
+                self.unary_scores, self.y_batch, self.lengths_batch)
+            # Add a training op to tune the parameters.
 
-                self.decoding, _ = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
+            self.decoding, _ = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
 
-                self.loss = tf.reduce_mean(-self.log_likelihood)
+            self.loss = tf.reduce_mean(-self.log_likelihood)
 
-                # self.apply_placeholder_op = tf.train.AdamOptimizer(learning_rate=self.learn_rate).minimize(self.loss)
+            # self.apply_placeholder_op = tf.train.AdamOptimizer(learning_rate=self.learn_rate).minimize(self.loss)
 
-                if self.optimizer_type == 'sgd':
-                    self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
-                else:
-                    self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+            if self.optimizer_type == 'sgd':
+                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
+            else:
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
 
-                l1_regularizer = tf.contrib.layers.l1_regularizer(
-                    scale=0.01, scope=None
-                )
-                weights = tf.trainable_variables()
-                regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
-                # self.grads = tf.gradients(self.loss, tf.trainable_variables())
-                # self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
-                # self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
-                regularized_loss = self.loss + regularization_penalty
-                self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
+            l1_regularizer = tf.contrib.layers.l1_regularizer(
+                scale=0.01, scope=None
+            )
+            weights = tf.trainable_variables()
+            regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
+            # self.grads = tf.gradients(self.loss, tf.trainable_variables())
+            # self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
+            # self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
+            regularized_loss = self.loss + regularization_penalty
+            self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
 
             self.saver = tf.train.Saver()
             self.init_op = tf.global_variables_initializer()  # always session.run this op first!
