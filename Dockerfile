@@ -1,4 +1,4 @@
-FROM nvidia/cuda:7.0-cudnn4-devel-ubuntu14.04
+FROM nvidia/cuda:8.0-cudnn6-devel-ubuntu14.04
 MAINTAINER aclapes
 
 RUN echo "deb http://us.archive.ubuntu.com/ubuntu trusty main multiverse" >> /etc/apt/sources.list \
