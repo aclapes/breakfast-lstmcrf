@@ -50,8 +50,7 @@ class SimpleLstmCrfModel(object):
                  num_epochs,
                  hidden_size,
                  drop_prob,
-                 optimizer_type='adam',
-                 device_name='/cpu:0'):
+                 optimizer_type='adam'):
 
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
@@ -69,7 +68,6 @@ class SimpleLstmCrfModel(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            # with tf.device(device_name):
             # x = features, y = labels in one-hot encoding, and w = binary mask of valid timesteps
             self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
             self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
@@ -257,8 +255,7 @@ class SimpleLstmModel(object):
                  num_epochs,
                  hidden_size,
                  drop_prob,
-                 optimizer_type='adam',
-                 device_name='/cpu:0'):
+                 optimizer_type='adam'):
 
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
@@ -277,70 +274,69 @@ class SimpleLstmModel(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            with tf.device(device_name):
-                # Add the data to the TensorFlow graph.
-                # self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
-                # self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
-                # self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
-                # self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
-                self.x_batch = tf.placeholder(tf.float32, shape=[None, self.num_words, self.num_features])
-                self.y_batch = tf.placeholder(tf.int32, shape=[None, self.num_words])
-                self.w_batch = tf.placeholder(tf.float32, shape=[None, self.num_words])
-                self.state_placeholder = tf.placeholder(tf.float32, [2, None, self.hidden_size])
+            # Add the data to the TensorFlow graph.
+            # self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
+            # self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
+            # self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
+            # self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
+            self.x_batch = tf.placeholder(tf.float32, shape=[None, self.num_words, self.num_features])
+            self.y_batch = tf.placeholder(tf.int32, shape=[None, self.num_words])
+            self.w_batch = tf.placeholder(tf.float32, shape=[None, self.num_words])
+            self.state_placeholder = tf.placeholder(tf.float32, [2, None, self.hidden_size])
 
-                self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+            self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
-                # self.lrate = tf.placeholder(tf.float32, shape=[])
+            # self.lrate = tf.placeholder(tf.float32, shape=[])
 
-                self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-                self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0) # TODO: experiemnt with this one
+            self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0) # TODO: experiemnt with this one
 
-                cell = rnn.LSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
-                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=(1-self.drop_prob))
+            cell = rnn.LSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
+            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=(1-self.drop_prob))
 
-                self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
-                # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
+            self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+            # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
 
-                # Obtain the idx-th from num_steps chunks of length step_size
-                rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
-                    cell,
-                    self.x_drop,
-                    dtype=tf.float32,
-                    initial_state=self.init_state_tuple, # statefull rnn
-                    sequence_length=self.lengths_batch  # do not process padded parts
-                )
+            # Obtain the idx-th from num_steps chunks of length step_size
+            rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
+                cell,
+                self.x_drop,
+                dtype=tf.float32,
+                initial_state=self.init_state_tuple, # statefull rnn
+                sequence_length=self.lengths_batch  # do not process padded parts
+            )
 
-                outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
+            outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
 
-                # # Compute unary scores from a linear layer.
-                # output = tf.reshape(tf.stack(self._outputs, axis=1), [-1, self.hidden_size])
-                output = tf.reshape(outputs_dropout, [-1, self.hidden_size])
-                softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
-                softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32, initializer=tf.zeros_initializer())
-                logits = tf.matmul(output, softmax_w) + softmax_b
+            # # Compute unary scores from a linear layer.
+            # output = tf.reshape(tf.stack(self._outputs, axis=1), [-1, self.hidden_size])
+            output = tf.reshape(outputs_dropout, [-1, self.hidden_size])
+            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32, initializer=tf.zeros_initializer())
+            logits = tf.matmul(output, softmax_w) + softmax_b
 
-                logits = tf.nn.softmax(logits)
+            logits = tf.nn.softmax(logits)
 
-                logits = tf.reshape(
-                    logits, [tf.shape(self.x_batch)[0], self.num_words, num_tags]
-                )
+            logits = tf.reshape(
+                logits, [tf.shape(self.x_batch)[0], self.num_words, num_tags]
+            )
 
-                self.pred = tf.argmax(logits, 2)
+            self.pred = tf.argmax(logits, 2)
 
-                self.loss = tf.contrib.seq2seq.sequence_loss(
-                    logits,
-                    self.y_batch,
-                    self.w_batch
-                )
+            self.loss = tf.contrib.seq2seq.sequence_loss(
+                logits,
+                self.y_batch,
+                self.w_batch
+            )
 
-                if self.optimizer_type == 'sgd':
-                    self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
-                else:
-                    self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+            if self.optimizer_type == 'sgd':
+                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
+            else:
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
 
-                self.grads = tf.gradients(self.loss, tf.trainable_variables())
-                self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
-                self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
+            self.grads = tf.gradients(self.loss, tf.trainable_variables())
+            self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
+            self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
 
             self.saver = tf.train.Saver()
             self.init_op = tf.global_variables_initializer()  # always session.run this op first!
@@ -541,16 +537,6 @@ if __name__ == '__main__':
         help=
         'Model type (crf, lstm or lstmcrf) (default: %(default)s)')
 
-    parser.add_argument(
-        '-D',
-        '--device-name',
-        type=str,
-        dest='device_name',
-        default='/cpu:0',
-        help=
-        'Device name ("/cpu:0" or "/gpu:<ID>") (default: %(default)s)')
-
-
     args = parser.parse_args()
     print args
 
@@ -566,8 +552,7 @@ if __name__ == '__main__':
             num_epochs=args.num_epochs,
             hidden_size=args.hidden_size,
             drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type,
-            device_name=args.device_name
+            optimizer_type=args.optimizer_type
         )
     elif args.model_type == 'lstm':
         m = SimpleLstmModel(
@@ -579,8 +564,7 @@ if __name__ == '__main__':
             num_epochs=args.num_epochs,
             hidden_size=args.hidden_size,
             drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type,
-            device_name=args.device_name
+            optimizer_type=args.optimizer_type
         )
     # else:
     #     m = SimpleCrfModel(
@@ -592,7 +576,6 @@ if __name__ == '__main__':
     #         num_epochs=args.num_epochs,
     #         hidden_size=args.hidden_size,
     #         drop_prob=args.drop_prob,
-    #         optimizer_type=args.optimizer_type,
-    #         device_name=args.device_name
+    #         optimizer_type=args.optimizer_type
     #     )
     m.run()
