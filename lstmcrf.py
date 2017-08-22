@@ -5,7 +5,6 @@ import time
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.contrib import rnn
-from sklearn import preprocessing
 
 import h5py
 import argparse
