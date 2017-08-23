@@ -6,7 +6,6 @@ import numpy as np
 
 from src.data import import_labels
 
-step_size = 20
 
 def generate_output(video_info, labels, length=16):
     ''' Given the info of the vide, generate a vector of classes corresponding
@@ -40,7 +39,7 @@ def generate_output(video_info, labels, length=16):
 
     return instances
 
-def create(features_path, info_file, labels_file, output_dir):
+def create(features_path, stride, info_file, labels_file, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         videos_data = {
@@ -77,7 +76,7 @@ def create(features_path, info_file, labels_file, output_dir):
             assert dataset[subset]['video_features'][key].shape[0] == dataset[subset]['lengths'][key]
 
     max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
-    max_len = ((max_len // step_size) + 1) * step_size
+    max_len = ((max_len // stride) + 1) * stride
 
     output_file = os.path.join(output_dir, 'dataset_stateful.hdf5')
     f_dataset = h5py.File(output_file, 'w')
@@ -118,6 +117,16 @@ def create(features_path, info_file, labels_file, output_dir):
             data=lengths[perm],
             chunks=(16,1),
             dtype='int32')
+
+    # Save some additional attributes
+    f_dataset.attrs['no_classes'] = len(labels)
+    f_dataset.attrs['stride'] = stride
+
+    f_dataset.close()
+
+    # Sanity check
+    f_dataset = h5py.File(output_file, 'r')
+    f_dataset.attrs['no_classes'] == len(labels)
     f_dataset.close()
 
 
@@ -152,6 +161,15 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
+        '-s',
+        '--stride',
+        type=int,
+        dest='stride',
+        default=20,
+        help=
+        'Pad the end of the sequence, so no. steps is multiple of s (default: %(default)s)')
+
+    parser.add_argument(
         '-o',
         '--output-file',
         type=str,
@@ -162,4 +180,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    create(args.features_file, args.videos_info, args.labels, args.output_file)
+    create(args.features_file,
+           args.stride,
+           args.videos_info,
+           args.labels,
+           args.output_file)
