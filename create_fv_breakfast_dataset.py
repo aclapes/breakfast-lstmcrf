@@ -6,17 +6,19 @@ import numpy as np
 
 from src.data import import_labels
 
-pool_size = 8
-step_size = 20
-
-def read_features(filepath, length=16):
+def read_features(filepath, pool_op, length=8):
     import csv
     with open(filepath, 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter='\t')
         X = np.array([l for l in reader], dtype=np.float32)[:,1:]
     X = X[:(X.shape[0]//length)*length,:]
 
-    X = np.mean(X.reshape(X.shape[0]//length, length, X.shape[1]), axis=1)
+    if pool_op == 'avg':  # average pooling
+        X = np.mean(X.reshape(X.shape[0]//length, length, X.shape[1]), axis=1)
+    elif pool_op == 'max':  # max pooling
+        X_r = X.reshape(X.shape[0]//length, length, X.shape[1])
+        X_min, X_max = X_r.min(axis=1)
+        X = np.where(-X_min > X_max, X_min, X_max)
 
     return X
 
@@ -52,18 +54,22 @@ def generate_output(video_info, labels, length=16):
 
     return instances
 
-def create(features_path, info_file, labels_file, output_file):
+def create(features_path, pool_op, pool_size, stride, info_file, labels_file, output_file):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
-        for key, value in videos_data.iteritems():
-            if videos_data[key]['subset'] == 'validation':
-                videos_data[key]['subset'] = 'training'
+        # uncomment if want to merge validation and testing
+        # ---
+        # for key, value in videos_data.iteritems():
+        #     if videos_data[key]['subset'] == 'validation':
+        #         videos_data[key]['subset'] = 'training'
+        # ---
 
     with open(labels_file, 'r') as f:
         labels = import_labels(f)
 
     dataset = dict()
-    subsets = ['training', 'testing']
+    subsets = ['training', 'testing', 'validation']
+    # subsets = ['training', 'testing']  # substitute for above line to merge validation and testing
     for subset in subsets:
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
@@ -81,7 +87,7 @@ def create(features_path, info_file, labels_file, output_file):
         for i,key in enumerate(videos):
             print('Reading %d/%d from disk...' % (i,nb_videos-1))
             filepath = os.path.join(features_path + key.split('_')[-1], key + '.txt')
-            x = read_features(filepath, length=pool_size)
+            x = read_features(filepath, pool_op, length=pool_size)
             y = generate_output(videos_data[key], labels, length=pool_size)
             dataset[subset]['video_features'][key] = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
             dataset[subset]['outputs'][key] = y
@@ -89,9 +95,10 @@ def create(features_path, info_file, labels_file, output_file):
             assert dataset[subset]['video_features'][key].shape[0] == len(dataset[subset]['outputs'][key])
 
     max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
-    max_len = ((max_len // step_size) + 1) * step_size
+    max_len = ((max_len // stride) + 1) * stride
 
     f_dataset = h5py.File(output_file, 'w')
+
     for subset in subsets:
         print('Creating HDF file for %s...' % (subset))
         videos = [
@@ -127,6 +134,18 @@ def create(features_path, info_file, labels_file, output_file):
             data=lengths[perm],
             chunks=(16,1),
             dtype='int32')
+
+    # Save some additional attributes
+    f_dataset.attrs['no_classes'] = len(labels)
+    f_dataset.attrs['pool_op'] = pool_op
+    f_dataset.attrs['pool_size'] = pool_size
+    f_dataset.attrs['stride'] = stride
+
+    f_dataset.close()
+
+    # Sanity check
+    f_dataset = h5py.File(output_file, 'r')
+    f_dataset.attrs['no_classes'] == len(labels)
     f_dataset.close()
 
 
@@ -161,14 +180,48 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
+        '-po',
+        '--pool-op',
+        type=str,
+        dest='pool_op',
+        default='avg',
+        help=
+        'Pooling operation (avg or max) (default: %(default)s)')
+
+    parser.add_argument(
+        '-ps',
+        '--pool-size',
+        type=int,
+        dest='pool_size',
+        default=8,
+        help=
+        'Pooling stride (default: %(default)s)')
+
+    parser.add_argument(
+        '-s',
+        '--stride',
+        type=int,
+        dest='stride',
+        default=20,
+        help=
+        'Pad the end of the sequence, so no. steps is multiple of s (default: %(default)s)')
+
+    parser.add_argument(
         '-o',
         '--output-file',
         type=str,
         dest='output_file',
-        default='/datasets/breakfast/fv/s1/dataset.8-20.h5',
+        default='/datasets/breakfast/fv/s1/dataset.h5',
         help=
         'Directory where hd5 file will be generated (default: %(default)s)')
 
     args = parser.parse_args()
+    print args
 
-    create(args.features_dir, args.videos_info, args.labels, args.output_file)
+    create(args.features_dir,
+           args.pool_op,
+           args.pool_size,
+           args.stride,
+           args.videos_info,
+           args.labels,
+           args.output_file)

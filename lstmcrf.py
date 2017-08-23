@@ -19,11 +19,11 @@ from src.data import import_labels, to_categorical
 
 
 # Data settings.
-num_examples = 32
+# num_examples = 32
 # step_size = 20
 # num_features = 4096
 num_tags = 48
-hidden_size = 512
+# hidden_size = 512
 
 def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
     n_batches = len(data) // batch_size
@@ -79,9 +79,10 @@ class SimpleCrfModel(object):
             softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
             logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
-            logits = tf.nn.softmax(logits)
-
-            self.unary_scores = tf.reshape(logits, [self.batch_size, self.num_words, num_tags])
+            normalized_logits = tf.nn.softmax(logits)
+            self.unary_scores = tf.reshape(
+                normalized_logits, [self.batch_size, self.num_words, num_tags]
+            )
 
             # Compute the log-likelihood of the gold sequences and keep the transition
             # params for inference at test time.
@@ -267,9 +268,8 @@ class SimpleLstmCrfModel(object):
             softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
             logits = tf.matmul(output, softmax_w) + softmax_b
 
-            logits = tf.nn.softmax(logits)
-
-            self.unary_scores = tf.reshape(logits, [self.batch_size, self.num_words, num_tags])
+            normalized_logits = tf.nn.softmax(logits)
+            self.unary_scores = tf.reshape(normalized_logits, [self.batch_size, self.num_words, num_tags])
 
             # Compute the log-likelihood of the gold sequences and keep the transition
             # params for inference at test time.
@@ -435,17 +435,13 @@ class SimpleLstmModel(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            # Add the data to the TensorFlow graph.
-            # self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
-            # self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
-            # self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
-            # self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
             self.x_batch = tf.placeholder(tf.float32, shape=[None, self.num_words, self.num_features])
             self.y_batch = tf.placeholder(tf.int32, shape=[None, self.num_words])
             self.w_batch = tf.placeholder(tf.float32, shape=[None, self.num_words])
-            self.state_placeholder = tf.placeholder(tf.float32, [2, None, self.hidden_size])
 
             self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+
+            self.state_placeholder = tf.placeholder(tf.float32, [2, None, self.hidden_size])
 
             # self.lrate = tf.placeholder(tf.float32, shape=[])
 
@@ -476,13 +472,12 @@ class SimpleLstmModel(object):
             softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32, initializer=tf.zeros_initializer())
             logits = tf.matmul(output, softmax_w) + softmax_b
 
-            logits = tf.nn.softmax(logits)
-
-            logits = tf.reshape(
-                logits, [tf.shape(self.x_batch)[0], self.num_words, num_tags]
+            normalized_logits = tf.nn.softmax(logits)
+            normalized_logits = tf.reshape(
+                normalized_logits, [tf.shape(self.x_batch)[0], self.num_words, num_tags]
             )
 
-            self.pred = tf.argmax(logits, 2)
+            self.pred = tf.argmax(normalized_logits, 2)
 
             self.loss = tf.contrib.seq2seq.sequence_loss(
                 logits,
@@ -616,22 +611,24 @@ class SimpleLstmModel(object):
                 progbar.update(b)
             progbar.finish()
 
-            # Validation accuracy is the mean accuracy over batch accuracies
             print(
-                'train acc: %.2f%%, val acc: %.2f%%, te acc: %.2f%%' %
+                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' %
                 (np.mean(train_batch_accs), np.mean(val_batch_accs), np.mean(te_batch_accs))
             )
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Create breakfast hdf5 dataset from feature files.')
+    parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
 
+    # -----------------------------------------------
+    # General parameters
+    # -----------------------------------------------
     parser.add_argument(
         '-i',
         '--input-file',
         type=str,
         dest='input_file',
-        default='/data/datasets/breakfast/fv/s1/dataset.h5',
+        default='/data/datasets/breakfast/fv/s1/dataset.8-20.h5',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -663,24 +660,6 @@ if __name__ == '__main__':
         'Num epochs (default: %(default)s)')
 
     parser.add_argument(
-        '-s',
-        '--hidden-size',
-        type=int,
-        dest='hidden_size',
-        default=512,
-        help=
-        'Hidden size (default: %(default)s)')
-
-    parser.add_argument(
-        '-p',
-        '--drop-prob',
-        type=float,
-        dest='drop_prob',
-        default=0.5,
-        help=
-        'Dropout probability (default: %(default)s)')
-
-    parser.add_argument(
         '-ot',
         '--optimizer-type',
         type=str,
@@ -698,11 +677,35 @@ if __name__ == '__main__':
         help=
         'Model type (crf, lstm or lstmcrf) (default: %(default)s)')
 
+    # -----------------------------------------------
+    # (LSTM-only parameters)
+    # -----------------------------------------------
+    parser.add_argument(
+        '-s',
+        '--hidden-size',
+        type=int,
+        dest='hidden_size',
+        default=512,
+        help=
+        'Hidden size (default: %(default)s)')
+
+    parser.add_argument(
+        '-p',
+        '--drop-prob',
+        type=float,
+        dest='drop_prob',
+        default=0.5,
+        help=
+        'Dropout probability (default: %(default)s)')
+    # -----------------------------------------------
+
     args = parser.parse_args()
     print args
 
+    # Read dataset from hdf5 file
     f_dataset = h5py.File(args.input_file, 'r')
 
+    # Create a model (choosen via argument passing)
     if args.model_type == 'lstmcrf':
         m = SimpleLstmCrfModel(
             f_dataset['training'],
@@ -740,4 +743,10 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError('Please specify a valid model (-M <model_type>).')
 
+    # -----------------------------------------------
+    # RUN
+    # -----------------------------------------------
     m.run()
+    # -----------------------------------------------
+
+    f_dataset.close()
