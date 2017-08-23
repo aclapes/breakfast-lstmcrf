@@ -1,21 +1,12 @@
 import numpy as np
-import os
 import tensorflow as tf
-import time
-from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import math_ops
-from tensorflow.contrib import rnn
 
 import h5py
 import argparse
-import json
 from progressbar import ProgressBar
-import crf
 
-
-from tensorflow.python.ops import variable_scope as vs
-
-from src.data import import_labels, to_categorical
+from tensorflow.contrib import rnn
+import src.crf as crf  # master's version of tf.contrib.crf
 
 
 def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
