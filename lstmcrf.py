@@ -9,18 +9,54 @@ from tensorflow.contrib import rnn
 import src.crf as crf  # master's version of tf.contrib.crf
 
 
-def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
-    n_batches = len(data) // batch_size
+def read_data_generator(data, labels, lengths, batch_size=16):
+    '''
+    This generator function serves a batch of the dataset at each call.
+    See what a generator function is ;)
+    :param data:
+    :param labels:
+    :param lengths:
+    :param batch_size:
+    :return:
+    '''
+
+    n_batches = len(data) // batch_size  # this will discard the last batch
+
     for i in range(n_batches):
-        x = data[(i*batch_size):((i+1)*batch_size),:,:]
-        y = labels[(i * batch_size):((i + 1) * batch_size), :]
-        l = lengths[(i * batch_size):((i + 1) * batch_size)]
-        w = np.zeros((x.shape[0], x.shape[1]), dtype=np.float32)
-        for k in range(w.shape[0]):
-            l_k = int(l[k])
-            w[k, :l_k] = 1.
+        # prepare the batch
+        x = data[(i*batch_size):((i+1)*batch_size),:,:] # batch features
+        y = labels[(i * batch_size):((i + 1) * batch_size), :] # batch labels
+
+        # instead of using lengths, create a binary mask (to mask padded timesteps)
+        l = lengths[(i * batch_size):((i + 1) * batch_size)]  # not returned!
+
+        # batch mask preparation
+        w = np.zeros((l.shape[0], y.shape[1]), dtype=np.float32)
+        for k in range(l.shape[0]):
+            l_k = int(l[k])  # length of the k-th seq in the batch
+            w[k, :l_k] = 1.  # binary mask for k-th seq
 
         yield (x, y, w)
+
+
+def compute_framewise_accuracy(predictions, labels, weights):
+    '''
+    Computes the framewise accuracy over a set of predictions.
+
+    :param predictions: 2-D array of predictions [num_batches, num_timesteps]
+    :param labels: 2-D array of labels [num_batches, num_timesteps]
+    :param weights: 2-D array of weights [num_batches, num_timesteps]. Used to mask padded timesteps.
+    :return:
+    '''
+
+    correct_labels = total_labels = 0.
+
+    for pred, y, w in zip(predictions, labels, weights):
+        length = int(np.sum(w))
+        correct_labels += np.sum(np.equal(pred[:length], y[:length]))
+        total_labels += length
+
+    return 100. * correct_labels / float(total_labels)
 
 
 class SimpleCrfModel(object):
@@ -36,12 +72,13 @@ class SimpleCrfModel(object):
 
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
+        self.x_te, self.y_te, self.lengths_te = te['video_features'], te['outputs'], te['lengths']
 
         self.no_classes = no_classes
 
         self.batch_size = batch_size
-        self.num_words = self.x.shape[1]
-        self.num_features = self.x.shape[2]
+        self.num_words = train['video_features'].shape[1]
+        self.num_features = train['video_features'].shape[2]
 
         self.learn_rate = learn_rate
         self.num_epochs = num_epochs
@@ -58,10 +95,10 @@ class SimpleCrfModel(object):
             self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
             self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+            x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
             # Compute unary scores from a linear layer.
-            matricied_x = tf.reshape(self.x_drop, [-1, self.num_features])
+            matricied_x = tf.reshape(x_drop, [-1, self.num_features])
             softmax_w = tf.get_variable('softmax_w', [self.num_features, self.no_classes], dtype=tf.float32)
             softmax_b = tf.get_variable('softmax_b', [self.no_classes], dtype=tf.float32)
             logits = tf.matmul(matricied_x, softmax_w) + softmax_b
@@ -112,38 +149,24 @@ class SimpleCrfModel(object):
                     self.x, self.y, self.lengths, batch_size=self.batch_size
                 )
 
+                num_train_batches = self.x.shape[0] // self.batch_size
+                train_batch_loss = [None] * num_train_batches
+                train_batch_accs = [None] * num_train_batches
+
                 progbar = ProgressBar(max_value=self.x.shape[0] // self.batch_size)
-                num_train_batches = 0
-                train_loss = train_acc = 0.
-                while True:
-                    try:
-                        batch = self.train_reader.next()
-                    except StopIteration:
-                        break
+                for b in range(num_train_batches):
+                    batch = self.train_reader.next()
 
                     # Run forward and backward (backprop)
-                    loss, decoding, _ = session.run(
+                    train_batch_loss[b], decoding, _ = session.run(
                         [self.loss, self.decoding, self.apply_placeholder_op],
                         feed_dict={
                             self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]
                         }
                     )
+                    train_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
 
-                    # Get frame-wise using viterbi decoding
-                    correct_labels = total_labels = 0.
-                    # Iterate over sequences in a batch
-                    for y_pred, y_true, w in zip(decoding, batch[1], batch[2]):
-                        length = int(np.sum(w))
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    acc = 100. * correct_labels / float(total_labels)
-
-                    # Print info
-                    progbar.update(num_train_batches)
-                    # print(', loss: %.2f, acc: %.2f%%' % (loss, acc))
-                    train_loss += loss
-                    train_acc += acc
-                    num_train_batches += 1
+                    progbar.update(b)
                 progbar.finish()
 
                 # Validation
@@ -151,42 +174,63 @@ class SimpleCrfModel(object):
                     self.x_val, self.y_val, self.lengths_val, batch_size=self.batch_size
                 )
 
-                num_val_batches = 0
-                val_loss = val_acc = 0.
-                while True:
-                    try:
-                        batch = self.val_reader.next()
-                    except StopIteration:
-                        break
+                num_val_batches = self.x_val.shape[0] // self.batch_size
+                val_batch_loss = [None] * num_val_batches
+                val_batch_accs = [None] * num_val_batches
+
+                progbar = ProgressBar(max_value=self.x_val.shape[0] // self.batch_size)
+                for b in range(num_val_batches):
+                    batch = self.val_reader.next()
 
                     # Run forward, but not backprop
-                    loss, decoding = session.run(
+                    val_batch_loss[b], decoding = session.run(
                         [self.loss, self.decoding],
                         feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]}
                     )
+                    val_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
 
-                    correct_labels = total_labels = 0.
-                    for y_pred, y_true, length in zip(decoding, batch[1], batch[2]):
-                        length = int(np.sum(w))
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    acc = 100. * correct_labels / float(total_labels)
-                    val_loss += loss
-                    val_acc += acc
-                    num_val_batches += 1
+                    progbar.update(b)
+                progbar.finish()
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_loss / num_train_batches,
-                        train_acc / num_train_batches,
-                        val_loss / num_val_batches,
-                        val_acc / num_val_batches
+                        np.mean(train_batch_loss), np.mean(train_batch_accs),
+                        np.mean(val_batch_loss), np.mean(val_batch_accs)
                     )
                 )
 
                 if e % 2 == 0:
                     self.saver.save(session, 'simplecrf_model', global_step=e)
+
+            # Testing
+            self.te_reader = read_data_generator(self.x_te, self.y_te, self.lengths_te, batch_size=1)
+
+            init_state = np.zeros((2, 1, self.hidden_size), dtype=np.float32)  # 2 for c and h
+
+            num_te_batches = self.x_te.shape[0]  # batch_size = 1 in this case
+            te_batch_accs = [None] * num_te_batches
+
+            progbar = ProgressBar(max_value=num_te_batches)
+            for b in range(num_te_batches):
+                batch = self.te_reader.next()
+
+                # Run forward, but not backprop
+                decoding = session.run(
+                    [self.pred],
+                    feed_dict={
+                        self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2],
+                        self.state_placeholder: init_state
+                    }
+                )
+                te_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
+                progbar.update(b)
+            progbar.finish()
+
+            print(
+                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' %
+                (np.mean(train_batch_accs), np.mean(val_batch_accs), np.mean(te_batch_accs))
+            )
 
 
 class SimpleLstmCrfModel(object):
@@ -231,7 +275,7 @@ class SimpleLstmCrfModel(object):
             self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
 
             self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+            x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
             # set the statefulness (if it weren't check other instruction)
             # </--
@@ -243,10 +287,11 @@ class SimpleLstmCrfModel(object):
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-self.drop_prob)  # TODO: check this
             rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
                 cell,
-                self.x_drop,
+                x_drop,
                 dtype=tf.float32,
                 initial_state=self.init_state_tuple, # statefull rnn
                 sequence_length=self.lengths_batch  # do not process padded parts
+
             )
 
             # outputs_dropout = tf.nn.dropout(rnn_outputs, keep_prob=(1-self.drop_prob))
@@ -273,20 +318,23 @@ class SimpleLstmCrfModel(object):
             # self.apply_placeholder_op = tf.train.AdamOptimizer(learning_rate=self.learn_rate).minimize(self.loss)
 
             if self.optimizer_type == 'sgd':
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
             else:
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+                optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
 
-            l1_regularizer = tf.contrib.layers.l1_regularizer(
-                scale=0.01, scope=None
-            )
-            weights = tf.trainable_variables()
-            regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
+            # l1_regularizer = tf.contrib.layers.l1_regularizer(
+            #     scale=0.01, scope=None
+            # )
+            # weights = tf.trainable_variables()
+            # regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
+            tvars = tf.trainable_variables()
             # self.grads = tf.gradients(self.loss, tf.trainable_variables())
             # self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
-            # self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
-            regularized_loss = self.loss + regularization_penalty
-            self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
+            grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), 5)
+            self.apply_placeholder_op = optimizer.apply_gradients(zip(grads, tvars))
+            # regularized_loss = self.loss + regularization_penalty
+
+            # self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
 
             self.saver = tf.train.Saver()
             self.init_op = tf.global_variables_initializer()  # always session.run this op first!
@@ -297,53 +345,34 @@ class SimpleLstmCrfModel(object):
 
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e+1,self.num_epochs))
+
                 self.train_reader = read_data_generator(
                     self.x, self.y, self.lengths, batch_size=self.batch_size
                 )
 
-                init_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
+                num_train_batches = self.x.shape[0] // self.batch_size
+                train_batch_loss = [None] * num_train_batches
+                train_batch_accs = [None] * num_train_batches
 
-                progbar = ProgressBar(max_value=self.x.shape[0] // self.batch_size)
-                num_train_batches = 0
-                train_loss = train_acc = 0.
-                while True:
-                    try:
-                        batch = self.train_reader.next()
-                        batch_lengths = np.sum(batch[2],axis=1)  # length of seqs in batch from mask of valid timesteps
-                    except StopIteration:
-                        break
+                stateful_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
+
+                progbar = ProgressBar(max_value=num_train_batches)
+                for b in range(num_train_batches):
+                    batch = self.train_reader.next()
 
                     # Run forward and backward (backprop)
-                    loss, unary_scores_batch, transition_params, decoding, _, init_state = session.run(
+                    train_batch_loss[b], decoding, _, stateful_state = session.run(
                         [self.loss,
-                         self.unary_scores,
-                         self.transition_params,
                          self.decoding,
                          self.apply_placeholder_op,
                          self.rnn_state],
                         feed_dict = {
                             self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
-                            self.state_placeholder : init_state
+                            self.state_placeholder : stateful_state
                         }
                     )
-
-                    # Get frame-wise using viterbi decoding
-                    correct_labels = total_labels = 0.
-                    # Iterate over sequences in a batch
-                    for y_pred, y_true, length in zip(decoding, batch[1], batch_lengths):
-                        # Decode the sequence
-                        # pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
-                        # Count per-timestep hits
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    acc = 100. * correct_labels / float(total_labels)
-
-                    # Print info
-                    progbar.update(num_train_batches)
-                    # print(', loss: %.2f, acc: %.2f%%' % (loss, acc))
-                    train_loss += loss
-                    train_acc += acc
-                    num_train_batches += 1
+                    train_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
+                    progbar.update(b)
                 progbar.finish()
 
                 # Validation
@@ -351,47 +380,64 @@ class SimpleLstmCrfModel(object):
                     self.x_val, self.y_val, self.lengths_val, batch_size=self.batch_size
                 )
 
-                init_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
+                stateful_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
 
-                num_val_batches = 0
-                val_loss = val_acc = 0.
-                while True:
-                    try:
-                        batch = self.val_reader.next()
-                        batch_lengths = np.sum(batch[2], axis=1)
-                    except StopIteration:
-                        break
+                num_val_batches = self.x_val.shape[0] // self.batch_size
+                val_batch_accs = [None] * num_val_batches
+                val_batch_loss = [None] * num_val_batches
 
-                    # Run forward, but not backprop
-                    unary_scores_batch, transition_params_val = session.run(
-                        [self.unary_scores, self.transition_params],
+                progbar = ProgressBar(max_value=num_val_batches)
+                for b in range(num_val_batches):
+                    batch = self.val_reader.next()
+
+                    val_batch_loss[b], decoding, stateful_state = session.run(
+                        [self.loss, self.decoding, self.rnn_state],
                         feed_dict={self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
-                                   self.state_placeholder : init_state}
+                                   self.state_placeholder : stateful_state}
                     )
-
-                    correct_labels = total_labels = 0.
-                    for y_pred, y_true, w in zip(decoding, batch[1], batch[2]):
-                        length = int(np.sum(w))
-                        # pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    acc = 100. * correct_labels / float(total_labels)
-                    val_loss += loss
-                    val_acc += acc
-                    num_val_batches += 1
+                    val_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
+                    progbar.update(b)
+                progbar.finish()
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_loss/num_train_batches,
-                        train_acc/num_train_batches,
-                        val_loss/num_val_batches,
-                        val_acc/num_val_batches
+                        np.mean(train_batch_loss), np.mean(train_batch_accs),
+                        np.mean(val_batch_loss), np.mean(val_batch_accs)
                     )
                 )
 
                 if e % 2 == 0:
-                    self.saver.save(session, 'simplelstmcrf512_model', global_step=e)
+                    self.saver.save(session, 'simplelstmcrf_model', global_step=e)
+
+            # Testing
+            self.te_reader = read_data_generator(self.x_te, self.y_te, self.lengths_te, batch_size=1)
+
+            init_state = np.zeros((2, 1, self.hidden_size), dtype=np.float32)  # 2 for c and h
+
+            num_te_batches = self.x_te.shape[0]  # batch_size = 1 in this case
+            te_batch_accs = [None] * num_te_batches
+
+            progbar = ProgressBar(max_value=num_te_batches)
+            for b in range(num_te_batches):
+                batch = self.te_reader.next()
+
+                # Run forward, but not backprop
+                decoding = session.run(
+                    [self.decoding],
+                    feed_dict={
+                        self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2],
+                        self.state_placeholder: init_state
+                    }
+                )
+                te_batch_accs[b] = compute_framewise_accuracy(decoding, batch[1], batch[2])
+                progbar.update(b)
+            progbar.finish()
+
+            print(
+                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' %
+                (np.mean(train_batch_accs), np.mean(val_batch_accs), np.mean(te_batch_accs))
+            )
 
 
 class SimpleLstmModel(object):
@@ -437,20 +483,20 @@ class SimpleLstmModel(object):
             # self.lrate = tf.placeholder(tf.float32, shape=[])
 
             self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0) # TODO: experiemnt with this one
+            x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0) # TODO: experiemnt with this one
 
             cell = rnn.LSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=(1-self.drop_prob))
 
-            self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+            init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
             # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
 
             # Obtain the idx-th from num_steps chunks of length step_size
             rnn_outputs, self.rnn_state = tf.nn.dynamic_rnn(
                 cell,
-                self.x_drop,
+                x_drop,
                 dtype=tf.float32,
-                initial_state=self.init_state_tuple, # statefull rnn
+                initial_state=init_state_tuple, # statefull rnn
                 sequence_length=self.lengths_batch  # do not process padded parts
             )
 
@@ -470,20 +516,26 @@ class SimpleLstmModel(object):
 
             self.pred = tf.argmax(normalized_logits, 2)
 
-            self.loss = tf.contrib.seq2seq.sequence_loss(
-                logits,
+            loss = tf.contrib.seq2seq.sequence_loss(
+                normalized_logits,
                 self.y_batch,
-                self.w_batch
+                self.w_batch,
+                average_across_timesteps=False,
+                average_across_batch=True
             )
+            self.cost = tf.reduce_sum(loss)
 
             if self.optimizer_type == 'sgd':
-                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
+                optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
             else:
-                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+                optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
 
-            self.grads = tf.gradients(self.loss, tf.trainable_variables())
-            self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
-            self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
+            tvars = tf.trainable_variables()
+            grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
+            self.apply_placeholder_op = optimizer.apply_gradients(
+                zip(grads, tvars),
+                global_step=tf.contrib.framework.get_or_create_global_step()
+            )
 
             self.saver = tf.train.Saver()
             self.init_op = tf.global_variables_initializer()  # always session.run this op first!
@@ -500,72 +552,58 @@ class SimpleLstmModel(object):
                 )
 
                 num_train_batches = self.x.shape[0] // self.batch_size
-                train_batch_loss = [None] * num_train_batches
+                train_batch_costs = [None] * num_train_batches
                 train_batch_accs = [None] * num_train_batches
 
                 stateful_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
 
                 progbar = ProgressBar(max_value=num_train_batches)
+
                 for b in range(num_train_batches):
                     batch = self.train_reader.next()
 
                     # Run forward and backward (backprop)
-                    train_batch_loss[b], pred, _, stateful_state = session.run(
-                        [self.loss, self.pred, self.apply_placeholder_op, self.rnn_state],
+                    train_batch_costs[b], predictions, _, stateful_state = session.run(
+                        [self.cost, self.pred, self.apply_placeholder_op, self.rnn_state],
                         feed_dict = {
                             self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
                             self.state_placeholder : stateful_state
                         }
                     )
-
-                    # Get frame-wise using viterbi decoding
-                    correct_labels = total_labels = 0.
-                    # Iterate over sequences in a batch
-                    for y_pred, y_true, w in zip(pred, batch[1], batch[2]):
-                        length = np.sum(w)
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    train_batch_accs[b] = 100. * correct_labels / float(total_labels)
+                    train_batch_accs[b] = compute_framewise_accuracy(predictions, batch[1], batch[2])
                     progbar.update(b)
                 progbar.finish()
 
                 # Validation
                 self.val_reader = read_data_generator(self.x_val, self.y_val, self.lengths_val, batch_size=self.batch_size)
-                num_val_batches = self.x_val.shape[0] // self.batch_size
-                val_batch_accs = [None] * num_val_batches
-                val_batch_loss = [None] * num_val_batches
 
-                init_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
+                num_val_batches = self.x_val.shape[0] // self.batch_size
+                val_batch_costs = [None] * num_val_batches
+                val_batch_accs = [None] * num_val_batches
+
+                stateful_state = np.zeros((2, self.batch_size, self.hidden_size), dtype=np.float32)  # 2 for c and h
 
                 progbar = ProgressBar(max_value=num_val_batches)
                 for b in range(num_val_batches):
                     batch = self.val_reader.next()
 
                     # Run forward, but not backprop
-                    val_batch_loss[b], pred = session.run(
-                        [self.loss, self.pred],
+                    val_batch_costs[b], predictions, stateful_state = session.run(
+                        [self.cost, self.pred, self.rnn_state],
                         feed_dict = {
                             self.x_batch : batch[0], self.y_batch : batch[1], self.w_batch : batch[2],
-                            self.state_placeholder : init_state
+                            self.state_placeholder : stateful_state
                         }
                     )
-
-                    correct_labels = total_labels = 0.
-                    for y_pred, y_true, w in zip(pred, batch[1], batch[2]):
-                        length = np.sum(w)
-                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                        total_labels += length
-                    val_batch_accs[b] = 100. * correct_labels / float(total_labels)
+                    val_batch_accs[b] = compute_framewise_accuracy(predictions, batch[1], batch[2])
                     progbar.update(b)
                 progbar.finish()
 
                 # Validation accuracy is the mean accuracy over batch accuracies
                 print(
-                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        np.mean(train_batch_loss),
-                        np.mean(train_batch_accs),
-                        np.mean(val_batch_loss),
-                        np.mean(val_batch_accs)
+                    'TRAIN (cost/acc): %.4f/%.2f%%, VAL (cost/acc): %.4f/%.2f%%' % (
+                        np.mean(train_batch_costs), np.mean(train_batch_accs),
+                        np.mean(val_batch_costs), np.mean(val_batch_accs)
                     )
                 )
 
@@ -585,20 +623,14 @@ class SimpleLstmModel(object):
                 batch = self.te_reader.next()
 
                 # Run forward, but not backprop
-                loss, pred = session.run(
+                loss, predictions = session.run(
                     [self.loss, self.pred],
                     feed_dict={
                         self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2],
                         self.state_placeholder: init_state
                     }
                 )
-
-                correct_labels = total_labels = 0.
-                for y_pred, y_true, w in zip(pred, batch[1], batch[2]):
-                    length = np.sum(w)
-                    correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
-                    total_labels += length
-                te_batch_accs[b] = 100. * correct_labels / float(total_labels)
+                te_batch_accs[b] = compute_framewise_accuracy(predictions, batch[1], batch[2])
                 progbar.update(b)
             progbar.finish()
 
