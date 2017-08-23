@@ -64,7 +64,7 @@ CUDA_VISIBLE_DEVICES="0" python -u lstmcrf.py -M lstmcrf -i /data/datasets/break
 ```
 This instruction trains, validates, and tests a LSTMCRF model (specified by ```-M```). The ```dataset```, passed via
  ```-i```,  is expected to be a hdf5 type file with a certain format. ```create_fv_breakfast_dataset.py``` provides
-  a way to do it (see "Additional instructions" below). 
+  a way to do it (see "Data preparation" section below). 
 
 You can pass multiple GPUs through ```CUDA_VISIBLE_DEVICES``` (e.g. "0,2,5"). However, the code is not multi-GPU, 
 so you need to choose one particular device, e.g. 0-th.
@@ -78,13 +78,14 @@ docker attach <container_id>
 ```
 
 Once finished running, one may want to exit the container by typing ```exit``` in the container's bash. 
-This will stop the container. To restart the container:
+This will stop the container. To restart and reattach to the container:
 ```bash
 docker start <container_id>
+docker attach <container_id>
 ```
 
 
-## Additional instructions
+## Data preparation
 
 To run the code in ```lstmcrf.py```, you need to construct first a dataset containing the features with a certain format. 
 To do this, we provide create_X_breakfast_dataset python scripts in ```dataset``` directory. 
