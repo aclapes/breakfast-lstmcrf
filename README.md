@@ -1,5 +1,13 @@
 # Temporal segmentation on breakfast dataset
 
+In this repository, we provide an implementation of several models to perform temporal segmentation of
+the breakfast dataset (http://serre-lab.clps.brown.edu/resource/breakfast-actions-dataset/).
+
+We include: LSTMCRF, isolated LSTM, and isolated CRF.
+
+Next, the instructions to run the code in a docker container and some additional details about auxiliary/intermediate
+files needed to run the code.
+
 ## Instructions
 
 0. Clone the repository (or download) and navigate where the code and Dockerfile are placed.
