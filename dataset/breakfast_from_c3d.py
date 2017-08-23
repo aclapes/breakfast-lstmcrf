@@ -4,8 +4,19 @@ import json
 import os
 import numpy as np
 
-from src.data import import_labels
 
+def import_labels(f):
+    ''' Read from a file all the labels from it '''
+    lines = f.readlines()
+    labels = []
+    i = 0
+    for l in lines:
+        t = l.split('\t')
+        assert int(t[0]) == i
+        label = t[1].split('\n')[0]
+        labels.append(label)
+        i += 1
+    return labels
 
 def generate_output(video_info, labels, length=16):
     ''' Given the info of the vide, generate a vector of classes corresponding

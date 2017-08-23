@@ -1,15 +1,7 @@
 from __future__ import print_function
 import os
 import re
-import csv
 import numpy as np
-# from sklearn import preprocessing
-from os.path import basename, splitext, join
-import imageio
-# from skimage.transform import resize
-from imageio.core.format import CannotReadFrameError
-import h5py
-import random
 import imageio
 
 
