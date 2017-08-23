@@ -18,13 +18,6 @@ from tensorflow.python.ops import variable_scope as vs
 from src.data import import_labels, to_categorical
 
 
-# Data settings.
-# num_examples = 32
-# step_size = 20
-# num_features = 4096
-# num_tags = 48
-# hidden_size = 512
-
 def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
     n_batches = len(data) // batch_size
     for i in range(n_batches):
@@ -38,7 +31,7 @@ def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
 
         yield (x, y, w)
 
-# Train and evaluate the model.
+
 class SimpleCrfModel(object):
     def __init__(self,
                  train,
@@ -205,7 +198,6 @@ class SimpleCrfModel(object):
                     self.saver.save(session, 'simplecrf_model', global_step=e)
 
 
-# Train and evaluate the model.
 class SimpleLstmCrfModel(object):
     def __init__(self,
                  train,
@@ -411,7 +403,6 @@ class SimpleLstmCrfModel(object):
                     self.saver.save(session, 'simplelstmcrf512_model', global_step=e)
 
 
-# Train and evaluate the model.
 class SimpleLstmModel(object):
     def __init__(self,
                  train,
@@ -713,6 +704,7 @@ if __name__ == '__main__':
 
     # Read dataset from hdf5 file
     f_dataset = h5py.File(args.input_file, 'r')
+    print f_dataset.attrs
 
     # Create a model (choosen via argument passing)
     if args.model_type == 'lstmcrf':
