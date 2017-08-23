@@ -22,7 +22,7 @@ from src.data import import_labels, to_categorical
 # num_examples = 32
 # step_size = 20
 # num_features = 4096
-num_tags = 48
+# num_tags = 48
 # hidden_size = 512
 
 def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
@@ -44,6 +44,7 @@ class SimpleCrfModel(object):
                  train,
                  val,
                  te,
+                 no_classes,
                  batch_size,
                  learn_rate,
                  num_epochs,
@@ -51,6 +52,8 @@ class SimpleCrfModel(object):
 
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
+
+        self.no_classes = no_classes
 
         self.batch_size = batch_size
         self.num_words = self.x.shape[1]
@@ -75,13 +78,13 @@ class SimpleCrfModel(object):
 
             # Compute unary scores from a linear layer.
             matricied_x = tf.reshape(self.x_drop, [-1, self.num_features])
-            softmax_w = tf.get_variable('softmax_w', [self.num_features, num_tags], dtype=tf.float32)
-            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
+            softmax_w = tf.get_variable('softmax_w', [self.num_features, self.no_classes], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [self.no_classes], dtype=tf.float32)
             logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
             normalized_logits = tf.nn.softmax(logits)
             self.unary_scores = tf.reshape(
-                normalized_logits, [self.batch_size, self.num_words, num_tags]
+                normalized_logits, [self.batch_size, self.num_words, self.no_classes]
             )
 
             # Compute the log-likelihood of the gold sequences and keep the transition
@@ -208,6 +211,7 @@ class SimpleLstmCrfModel(object):
                  train,
                  val,
                  te,
+                 no_classes,
                  batch_size,
                  learn_rate,
                  num_epochs,
@@ -217,6 +221,8 @@ class SimpleLstmCrfModel(object):
 
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
+
+        self.no_classes = no_classes
 
         self.batch_size = batch_size
         self.num_words = self.x.shape[1]
@@ -264,12 +270,12 @@ class SimpleLstmCrfModel(object):
 
             # Compute unary scores from a linear layer.
             output = tf.reshape(rnn_outputs, [-1, self.hidden_size])
-            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
-            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
+            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, self.no_classes], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [self.no_classes], dtype=tf.float32)
             logits = tf.matmul(output, softmax_w) + softmax_b
 
             normalized_logits = tf.nn.softmax(logits)
-            self.unary_scores = tf.reshape(normalized_logits, [self.batch_size, self.num_words, num_tags])
+            self.unary_scores = tf.reshape(normalized_logits, [self.batch_size, self.num_words, self.no_classes])
 
             # Compute the log-likelihood of the gold sequences and keep the transition
             # params for inference at test time.
@@ -411,6 +417,7 @@ class SimpleLstmModel(object):
                  train,
                  val,
                  test,
+                 no_classes,
                  batch_size,
                  learn_rate,
                  num_epochs,
@@ -421,6 +428,8 @@ class SimpleLstmModel(object):
         self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
         self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
         self.x_te, self.y_te, self.lengths_te = test['video_features'], test['outputs'], test['lengths']
+
+        self.no_classes = no_classes
 
         self.batch_size = batch_size
         self.num_words = self.x.shape[1]
@@ -468,13 +477,13 @@ class SimpleLstmModel(object):
             # # Compute unary scores from a linear layer.
             # output = tf.reshape(tf.stack(self._outputs, axis=1), [-1, self.hidden_size])
             output = tf.reshape(outputs_dropout, [-1, self.hidden_size])
-            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, num_tags], dtype=tf.float32)
-            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32, initializer=tf.zeros_initializer())
+            softmax_w = tf.get_variable('softmax_w', [self.hidden_size, self.no_classes], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [self.no_classes], dtype=tf.float32, initializer=tf.zeros_initializer())
             logits = tf.matmul(output, softmax_w) + softmax_b
 
             normalized_logits = tf.nn.softmax(logits)
             normalized_logits = tf.reshape(
-                normalized_logits, [tf.shape(self.x_batch)[0], self.num_words, num_tags]
+                normalized_logits, [tf.shape(self.x_batch)[0], self.num_words, self.no_classes]
             )
 
             self.pred = tf.argmax(normalized_logits, 2)
@@ -711,6 +720,7 @@ if __name__ == '__main__':
             f_dataset['training'],
             f_dataset['validation'],
             f_dataset['testing'],
+            f_dataset.attrs['no_classes'],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             num_epochs=args.num_epochs,
@@ -723,6 +733,7 @@ if __name__ == '__main__':
             f_dataset['training'],
             f_dataset['testing'],
             f_dataset['testing'],
+            f_dataset.attrs['no_classes'],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             num_epochs=args.num_epochs,
@@ -735,6 +746,7 @@ if __name__ == '__main__':
             f_dataset['training'],
             f_dataset['validation'],
             f_dataset['testing'],
+            f_dataset.attrs['no_classes'],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             num_epochs=args.num_epochs,

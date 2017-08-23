@@ -184,7 +184,7 @@ if __name__ == '__main__':
         '--pool-op',
         type=str,
         dest='pool_op',
-        default='avg',
+        default='max',
         help=
         'Pooling operation (avg or max) (default: %(default)s)')
 
