@@ -5,9 +5,10 @@
 1. Pull the docker from dockerhub.
 ```bash
 docker pull aclapes/breakfast
-``
+```
+If not specified the tag is ```latest```, which is equivalent to pulling ```docker pull aclapes/breakfast:latest```.
 
-2. Run the docker: `
+2. Run a docker container from aclapes/breakfast image:
 ```bash
 nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets aclapes/breakfast
 ```
