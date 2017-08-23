@@ -38,6 +38,168 @@ def read_data_generator(data, labels, lengths, batch_size=16, one_hot=False):
 
         yield (x, y, w)
 
+# Train and evaluate the model.
+class SimpleCrfModel(object):
+    def __init__(self,
+                 train,
+                 val,
+                 te,
+                 batch_size,
+                 learn_rate,
+                 num_epochs,
+                 optimizer_type='adam'):
+
+        self.x, self.y, self.lengths = train['video_features'], train['outputs'], train['lengths']
+        self.x_val, self.y_val, self.lengths_val = val['video_features'], val['outputs'], val['lengths']
+
+        self.batch_size = batch_size
+        self.num_words = self.x.shape[1]
+        self.num_features = self.x.shape[2]
+
+        self.learn_rate = learn_rate
+        self.num_epochs = num_epochs
+
+        self.optimizer_type = optimizer_type
+
+        self.graph = tf.Graph()
+        with self.graph.as_default():
+            # x = features, y = labels in one-hot encoding, and w = binary mask of valid timesteps
+            self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
+            self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
+            self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
+            # get sequences length from binary mask of valid timesteps
+            self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+
+            self.x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+            self.x_drop = tf.nn.dropout(self.x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+
+            # Compute unary scores from a linear layer.
+            matricied_x = tf.reshape(self.x_drop, [-1, self.num_features])
+            softmax_w = tf.get_variable('softmax_w', [self.num_features, num_tags], dtype=tf.float32)
+            softmax_b = tf.get_variable('softmax_b', [num_tags], dtype=tf.float32)
+            logits = tf.matmul(matricied_x, softmax_w) + softmax_b
+
+            logits = tf.nn.softmax(logits)
+
+            self.unary_scores = tf.reshape(logits, [self.batch_size, self.num_words, num_tags])
+
+            # Compute the log-likelihood of the gold sequences and keep the transition
+            # params for inference at test time.
+            self.log_likelihood, self.transition_params = crf.crf_log_likelihood(
+                self.unary_scores, self.y_batch, self.lengths_batch)
+            # Add a training op to tune the parameters.
+
+            self.decoding, _ = crf.crf_decode(self.unary_scores, self.transition_params, self.lengths_batch)
+
+            self.loss = tf.reduce_mean(-self.log_likelihood)
+
+            # self.apply_placeholder_op = tf.train.AdamOptimizer(learning_rate=self.learn_rate).minimize(self.loss)
+
+            if self.optimizer_type == 'sgd':
+                self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learn_rate)
+            else:
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+
+            l1_regularizer = tf.contrib.layers.l1_regularizer(
+                scale=0.01, scope=None
+            )
+            weights = tf.trainable_variables()
+            regularization_penalty = tf.contrib.layers.apply_regularization(l1_regularizer, weights)
+            # self.grads = tf.gradients(self.loss, tf.trainable_variables())
+            # self.clip_grads = [tf.clip_by_value(g, -1, 1) for g in self.grads]
+            # self.apply_placeholder_op = self.optimizer.apply_gradients(zip(self.clip_grads, tf.trainable_variables()))
+            regularized_loss = self.loss + regularization_penalty
+            self.apply_placeholder_op = self.optimizer.minimize(regularized_loss)
+
+            self.saver = tf.train.Saver()
+            self.init_op = tf.global_variables_initializer()  # always session.run this op first!
+
+    def run(self):
+        with tf.Session(graph=self.graph) as session:
+            session.run(self.init_op)
+
+            for e in range(self.num_epochs):
+                print('Epoch: %d/%d' % (e + 1, self.num_epochs))
+                self.train_reader = read_data_generator(
+                    self.x, self.y, self.lengths, batch_size=self.batch_size
+                )
+
+                progbar = ProgressBar(max_value=self.x.shape[0] // self.batch_size)
+                num_train_batches = 0
+                train_loss = train_acc = 0.
+                while True:
+                    try:
+                        batch = self.train_reader.next()
+                    except StopIteration:
+                        break
+
+                    # Run forward and backward (backprop)
+                    loss, decoding, _ = session.run(
+                        [self.loss, self.decoding, self.apply_placeholder_op],
+                        feed_dict={
+                            self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]
+                        }
+                    )
+
+                    # Get frame-wise using viterbi decoding
+                    correct_labels = total_labels = 0.
+                    # Iterate over sequences in a batch
+                    for y_pred, y_true, w in zip(decoding, batch[1], batch[2]):
+                        length = int(np.sum(w))
+                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
+                        total_labels += length
+                    acc = 100. * correct_labels / float(total_labels)
+
+                    # Print info
+                    progbar.update(num_train_batches)
+                    # print(', loss: %.2f, acc: %.2f%%' % (loss, acc))
+                    train_loss += loss
+                    train_acc += acc
+                    num_train_batches += 1
+                progbar.finish()
+
+                # Validation
+                self.val_reader = read_data_generator(
+                    self.x_val, self.y_val, self.lengths_val, batch_size=self.batch_size
+                )
+
+                num_val_batches = 0
+                val_loss = val_acc = 0.
+                while True:
+                    try:
+                        batch = self.val_reader.next()
+                    except StopIteration:
+                        break
+
+                    # Run forward, but not backprop
+                    loss, decoding = session.run(
+                        [self.loss, self.decoding],
+                        feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]}
+                    )
+
+                    correct_labels = total_labels = 0.
+                    for y_pred, y_true, length in zip(decoding, batch[1], batch[2]):
+                        length = int(np.sum(w))
+                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
+                        total_labels += length
+                    acc = 100. * correct_labels / float(total_labels)
+                    val_loss += loss
+                    val_acc += acc
+                    num_val_batches += 1
+
+                # Validation accuracy is the mean accuracy over batch accuracies
+                print(
+                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
+                        train_loss / num_train_batches,
+                        train_acc / num_train_batches,
+                        val_loss / num_val_batches,
+                        val_acc / num_val_batches
+                    )
+                )
+
+                if e % 2 == 0:
+                    self.saver.save(session, 'simplecrf_model', global_step=e)
+
 
 # Train and evaluate the model.
 class SimpleLstmCrfModel(object):
@@ -72,6 +234,8 @@ class SimpleLstmCrfModel(object):
             self.x_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words, self.num_features])
             self.y_batch = tf.placeholder(tf.int32, shape=[self.batch_size, self.num_words])
             self.w_batch = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_words])
+            # get sequences length from binary mask of valid timesteps
+            self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
             # lstm state from previous iterations (stateful lstm)
             self.state_placeholder = tf.placeholder(tf.float32, [2, self.batch_size, self.hidden_size])
@@ -84,9 +248,6 @@ class SimpleLstmCrfModel(object):
             self.init_state_tuple = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
             # self.init_state = cell.zero_state(self.batch_size, dtype=tf.float32)
             # ---/>
-
-            # get sequences length from binary mask of valid timesteps
-            self.lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
             cell = rnn.BasicLSTMCell(self.hidden_size, forget_bias=0.0, state_is_tuple=True)
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-self.drop_prob)  # TODO: check this
@@ -219,11 +380,11 @@ class SimpleLstmCrfModel(object):
                                    self.state_placeholder : init_state}
                     )
 
-                    correct_labels = 0.
-                    total_labels = 0.
-                    for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
-                        correct_labels += np.sum(np.equal(pred, y_true[:length]))
+                    correct_labels = total_labels = 0.
+                    for y_pred, y_true, w in zip(decoding, batch[1], batch[2]):
+                        length = int(np.sum(w))
+                        # pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        correct_labels += np.sum(np.equal(y_pred[:length], y_true[:length]))
                         total_labels += length
                     acc = 100. * correct_labels / float(total_labels)
                     val_loss += loss
@@ -566,16 +727,17 @@ if __name__ == '__main__':
             drop_prob=args.drop_prob,
             optimizer_type=args.optimizer_type
         )
-    # else:
-    #     m = SimpleCrfModel(
-    #         f_dataset['training'],
-    #         f_dataset['testing'],
-    #         f_dataset['testing'],
-    #         batch_size=args.batch_size,
-    #         learn_rate=args.learn_rate,
-    #         num_epochs=args.num_epochs,
-    #         hidden_size=args.hidden_size,
-    #         drop_prob=args.drop_prob,
-    #         optimizer_type=args.optimizer_type
-    #     )
+    elif args.model_type == 'crf':
+        m = SimpleCrfModel(
+            f_dataset['training'],
+            f_dataset['validation'],
+            f_dataset['testing'],
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            num_epochs=args.num_epochs,
+            optimizer_type=args.optimizer_type
+        )
+    else:
+        raise NotImplementedError('Please specify a valid model (-M <model_type>).')
+
     m.run()
