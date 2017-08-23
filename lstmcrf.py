@@ -658,7 +658,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '-b',
         '--batch-size',
-        type=float,
+        type=int,
         dest='batch_size',
         default=32,
         help=
