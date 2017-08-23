@@ -23,9 +23,17 @@ RUN echo "deb http://us.archive.ubuntu.com/ubuntu trusty main multiverse" >> /et
 	&& apt-get clean \ 
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade setuptools pip imageio
-RUN pip install --upgrade h5py jupyter==1.0.0 numpy==1.11.2 progressbar2==3.9.3 Theano==0.8.2 youtube-dl tensorflow-gpu==1.3
-#RUN pip install --upgrade -r /tmp/requirements.txt
+RUN pip install --upgrade setuptools pip
+RUN pip install --upgrade
+    imageio \
+    h5py \
+    jupyter==1.0.0 \
+    numpy==1.11.2 \
+    progressbar2==3.9.3 \
+    Theano==0.8.2 \
+    youtube-dl \
+    tensorflow-gpu==1.3 \
+    git+https://github.com/albertomontesg/keras.git@improved-3d-ops
 
 RUN echo "[global]\ndevice=gpu\nfloatX=float32\noptimizer_including=cudnn\n\n[lib]\ncnmem=1\n\n[dnn]\nenabled=True" > .theanorc
 
