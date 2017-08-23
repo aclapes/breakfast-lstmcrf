@@ -2,20 +2,24 @@
 
 ## Instructions
 
-1. Pull the docker from dockerhub.
+0. Clone the repository (or download) and navigate where the code and Dockerfile are placed.
+
+1. Build the docker image:
 ```bash
-docker pull aclapes/breakfast
+docker build -t aclapes/breakfast:latest .
 ```
-If not specified the tag is ```latest```, which is equivalent to pulling ```docker pull aclapes/breakfast:latest```.
+Where ```:latest``` could be ommitted.
 
 2. Run a docker container from aclapes/breakfast image:
 ```bash
-nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets aclapes/breakfast
+nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ aclapes/breakfast:latest
 ```
+Option ```-v``` allows mapping a directory from docker's host into the docker container.
+Datasets/ is a directory of ours containing multiple datasets' data and related files.
 
 3. Navigate to the python source code.
 ```bash
-cd /home/dockeruser/src/breakfast-lstmcrf
+cd /home/dockeruser/src/
 ```
 
 4. To run the code you need to run the python script lstmcrf.py. Let see the options this script provides:
