@@ -1,7 +1,7 @@
 # Temporal segmentation on breakfast dataset
 
-In this repository, we provide an implementation of several models to perform temporal segmentation of
-the breakfast dataset (http://serre-lab.clps.brown.edu/resource/breakfast-actions-dataset/).
+In this repository, we provide an implementation of several models to perform temporal segmentation on
+breakfast dataset (http://serre-lab.clps.brown.edu/resource/breakfast-actions-dataset/).
 
 We include: LSTMCRF, isolated LSTM, and isolated CRF.
 
@@ -10,20 +10,20 @@ files needed to run the code.
 
 ## Instructions
 
-0. Clone the repository (or download) and navigate where the code and Dockerfile are placed.
+0. Clone the repository (or download) and navigate where code and Dockerfile are placed.
 
 1. Build the docker image:
 ```bash
 docker build -t aclapes/breakfast:latest .
 ```
 
-2. Run a docker container from aclapes/breakfast image:
+2. Run a docker container from the previously built image:
 ```bash
 nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ aclapes/breakfast:latest
 ```
-Option ```-v``` allows mapping a directory from docker's host into a running docker container.
+The option ```-v``` allows mapping a directory from docker's host into a running docker container.
 
-3. Navigate to the python source code.
+3. Once in the docker, navigate to the python source code.
 ```bash
 cd /home/dockeruser/src/
 ```
@@ -69,7 +69,20 @@ This instruction trains, validates, and tests a LSTMCRF model (specified by ```-
 You can pass multiple GPUs through ```CUDA_VISIBLE_DEVICES``` (e.g. "0,2,5"). However, the code is not multi-GPU, 
 so you need to choose one particular device, e.g. 0-th.
 
-(Note: You can ignore python's -u option, related to the buffering of the stdout).
+
+### Notes on docker usage
+
+When running the container one can dettach the running container doing ```ctrl+p``` ```ctrl+q``` and reattach later:
+```bash
+docker attach <container_id>
+```
+
+Once finished running, one may want to exit the container by typing ```exit``` in the container's bash. 
+This will stop the container. To restart the container:
+```bash
+docker start <container_id>
+```
+
 
 ## Additional instructions
 
