@@ -1,3 +1,10 @@
+#
+# DISCLAMER
+# ---------
+# This is an older but more cumbersome version of lstmcrf.py
+# It hasn't been tested or revised for a while (it may not work as it).
+#
+
 import numpy as np
 import os
 import tensorflow as tf
