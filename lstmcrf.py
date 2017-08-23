@@ -704,7 +704,9 @@ if __name__ == '__main__':
 
     # Read dataset from hdf5 file
     f_dataset = h5py.File(args.input_file, 'r')
-    print f_dataset.attrs
+    print('Dataset (%s) attributes:' % (args.input_file))
+    for key in f_dataset.attrs.keys():
+        print('%s : %s' % (key, str(f_dataset.attrs[key])))
 
     # Create a model (choosen via argument passing)
     if args.model_type == 'lstmcrf':
