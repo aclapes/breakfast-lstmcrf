@@ -15,11 +15,17 @@ import imageio
 
 def create_json_and_labels(path_videos, path_segmentation, output_labels_file, output_json_file):
     config = dict()
-    # Define train/test split
-    # config['pattern_train'] = '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_|P27_|P28_|P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_|P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
+
+    # Define test split:
     config['pattern_test'] = '(P03_|P04_|P05_|P06_|P07_|P08_|P09_|P10_|P11_|P12_|P13_|P14_|P15_)'
+
+    # Define training (and validation). Decide whether or not to have a validation split:
+    # </---
+    # config['pattern_train'] = '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_|P27_|P28_|P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_|P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
+    # ---
     config['pattern_train'] = '(P27_|P28_|P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_|P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
     config['pattern_val'] =  '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_)'
+    # ---/>
 
     config['segm_file_fmt'] = '.xml'
 
@@ -98,7 +104,5 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
 
 if __name__ == "__main__":
     create_json_and_labels('/data/vid/PALL/', '/data/segmentation_coarse/', 'dataset/labels.txt', 'dataset/videos.json')
-
-    # data = load_features(config['features'], config['segmentation'], config['pattern_train'],shuffle=True,seed=42,p=1.0)
 
     quit()
