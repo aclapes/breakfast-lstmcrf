@@ -24,7 +24,7 @@ RUN echo "deb http://us.archive.ubuntu.com/ubuntu trusty main multiverse" >> /et
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade setuptools pip
-RUN pip install --upgrade
+RUN pip install --upgrade \
     imageio \
     h5py \
     jupyter==1.0.0 \
