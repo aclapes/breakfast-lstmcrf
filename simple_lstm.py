@@ -70,19 +70,19 @@ class SimpleLstmModel(object):
             normalized_logits,
             self.y_batch,
             self.w_batch,
-            average_across_timesteps=False,
-            average_across_batch=True
+            # average_across_timesteps=False,
+            # average_across_batch=True
         )
         self.cost = tf.reduce_sum(loss)
 
         if not is_training:
             return
 
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
+        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
-        self.train_op = optimizer.apply_gradients(
+        self.train_op = self.optimizer.apply_gradients(
             zip(self.grads, tvars),
             global_step=tf.contrib.framework.get_or_create_global_step()
         )
@@ -127,7 +127,7 @@ class SimpleLstmModel(object):
 
             vals = session.run(fetches=fetches, feed_dict=feed_dict)
 
-            print vals['final_state'].h[0,:3]
+            # print vals['final_state'].h[0,:3]
             state = vals['final_state']
 
             batch_loss[b] = vals['cost']
