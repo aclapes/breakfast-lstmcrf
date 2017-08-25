@@ -219,9 +219,9 @@ class SimpleLstmPipeline(object):
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
                     self.train_model = SimpleLstmModel(config=config, input_data=train, is_training=True)
-            # with tf.name_scope('Validation'):
-            #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
-            #         self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
+            with tf.name_scope('Validation'):
+                with tf.variable_scope('Model', reuse=True, initializer=initializer):
+                    self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
             # with tf.name_scope('Test'):
             #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
             #         self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)
