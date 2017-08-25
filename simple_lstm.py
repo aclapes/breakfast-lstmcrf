@@ -5,9 +5,29 @@ from progressbar import ProgressBar
 
 from tensorflow.contrib import rnn
 
-from reader import read_data_generator
+# from reader import read_data_generator
 from evaluation import compute_framewise_accuracy
 
+def read_data_generator(data, labels, lengths, batch_size=16):
+    '''
+    This generator function serves a batch of the dataset at each call.
+    See what a generator function is ;)
+    :param data:
+    :param labels:
+    :param lengths:
+    :param batch_size:
+    :return:
+    '''
+
+    n_batches = len(data) // batch_size  # this will discard the last batch
+
+    for i in range(n_batches):
+        # prepare the batch
+        x = data[(i*batch_size):((i+1)*batch_size),:,:] # batch features
+        y = labels[(i * batch_size):((i + 1) * batch_size), :] # batch labels
+        l = lengths[(i * batch_size):((i + 1) * batch_size), :]  # not returned!
+
+        yield (x, y, np.squeeze(l))
 
 class SimpleLstmModel(object):
     def __init__(self, config, input_data, is_training):
@@ -29,9 +49,11 @@ class SimpleLstmModel(object):
         # Features, output labels, and binary mask of valid timesteps
         self.x_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words, num_features])
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
-        self.w_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words])
-        # get sequences length from binary mask of valid timesteps
-        lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+        self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
+
+        self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
+
+        classweights = tf.expand_dims(tf.constant(config['class_weights']), axis=0)
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
@@ -39,52 +61,68 @@ class SimpleLstmModel(object):
 
         cell = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        if is_training:
-            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
+        # if is_training:
+        #     cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
 
-        self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+
 
         rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
             cell,
             x_batch,
             dtype=tf.float32,
             initial_state=self.initial_state,  # statefull rnn
-            sequence_length=lengths_batch  # do not process padded parts
+            sequence_length=self.l_batch  # do not process padded parts
         )
 
-
-        # Compute unary scores from a linear layer.
         matricied_x = tf.reshape(rnn_outputs, [-1, hidden_size])
         softmax_w = tf.get_variable('softmax_w', [hidden_size, no_classes], dtype=tf.float32)
-        softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.zeros_initializer())
+        softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
-        normalized_logits = tf.nn.softmax(logits)
-        normalized_logits = tf.reshape(
-            normalized_logits, [batch_size, num_words, no_classes]
-        )
 
-        self.predictions = tf.argmax(normalized_logits, 2)
+        y_onehot = tf.one_hot(self.y_batch, no_classes, on_value=1.0, off_value=0.0, axis=-1)
+        y_onehot_matricied = tf.reshape(y_onehot, [-1, no_classes])
 
-        loss = tf.contrib.seq2seq.sequence_loss(
-            normalized_logits,
-            self.y_batch,
-            self.w_batch,
-            # average_across_timesteps=False,
-            # average_across_batch=True
-        )
-        self.cost = tf.reduce_sum(loss)
+        # See: https://stackoverflow.com/questions/35155655/loss-function-for-class-imbalanced-binary-classifier-in-tensor-flow#answer-38912982
+        # ---
+        weight_per_label = tf.transpose(tf.matmul(y_onehot_matricied, tf.transpose(classweights)))
+        xent = tf.multiply(weight_per_label,
+                      tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_onehot_matricied))
+        # ---
+        xent = tf.reshape(xent, [-1,num_words])
+
+        mask = tf.sequence_mask(self.l_batch)
+        masked_xent = tf.boolean_mask(xent, mask)
+
+        self.cost = tf.reduce_sum(masked_xent)
+
+        self.predictions = tf.argmax(tf.reshape(logits, [-1,num_words,no_classes]), 2)
+
+        # # losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=normalized_logits, labels=self.y_batch)
+        # # mask = tf.sequence_mask(self.l_batch)
+        # # losses = tf.boolean_mask(losses, mask)
+        # # self.cost = tf.reduce_mean(losses)
+        #
+        # loss = tf.contrib.seq2seq.sequence_loss(
+        #     normalized_logits,
+        #     self.y_batch,
+        #     tf.sequence_mask(self.l_batch, maxlen=num_words, dtype=tf.float32),
+        #     # average_across_timesteps=False,
+        #     # average_across_batch=True
+        # )
+        # self.cost = tf.reduce_sum(loss)
 
         if not is_training:
             return
 
-        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
         self.train_op = self.optimizer.apply_gradients(
-            zip(self.grads, tvars),
-            global_step=tf.contrib.framework.get_or_create_global_step()
+            zip(self.grads, tvars)
         )
 
     def run_epoch(self, session):
@@ -104,7 +142,8 @@ class SimpleLstmModel(object):
         batch_loss = [None] * num_batches
         batch_accs = [None] * num_batches
 
-        state = session.run(self.initial_state)
+        # state = session.run(self.initial_state)
+        state = np.zeros((2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
 
         fetches = {
             'cost': self.cost,
@@ -113,17 +152,18 @@ class SimpleLstmModel(object):
         }
         if self.is_training:
             fetches['train_op'] = self.train_op
-            fetches['grads'] = self.grads
+            # fetches['grads'] = self.grads
 
         progbar = ProgressBar(max_value=num_batches)
         for b in range(num_batches):
             batch = self.reader.next()
 
-            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]}
+            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2],
+                         self.state_placeholder: state}
 
-            c, h = self.initial_state
-            feed_dict[c] = state.c
-            feed_dict[h] = state.h
+            # c, h = self.initial_state
+            # feed_dict[c] = state.c
+            # feed_dict[h] = state.h
 
             vals = session.run(fetches=fetches, feed_dict=feed_dict)
 
@@ -132,7 +172,7 @@ class SimpleLstmModel(object):
 
             batch_loss[b] = vals['cost']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
-
+            print np.unique(vals['predictions'])
             progbar.update(b)
         progbar.finish()
 
@@ -145,6 +185,7 @@ class SimpleLstmPipeline(object):
                  val,
                  te,
                  no_classes,
+                 class_weights,
                  batch_size,
                  learn_rate,
                  num_epochs,
@@ -156,6 +197,7 @@ class SimpleLstmPipeline(object):
 
         config = dict(
             no_classes = no_classes,
+            class_weights = class_weights,
             batch_size = batch_size,
             num_words = train['video_features'].shape[1],
             num_features = train['video_features'].shape[2],
@@ -170,15 +212,19 @@ class SimpleLstmPipeline(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
+            initializer = tf.random_uniform_initializer(-0.01,
+                                                        0.01)
+
             # initializer = tf.random_uniform_initializer(-0.05, 0.05)
-            with tf.variable_scope('Model', reuse=False):#, initializer=initializer):
-                self.train_model = SimpleLstmModel(config=config, input_data=train, is_training=True)
-
-            with tf.variable_scope('Model', reuse=True):#, initializer=initializer):
-                self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
-
-            with tf.variable_scope('Model', reuse=True):#, initializer=initializer):
-                self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)
+            with tf.name_scope('Train'):
+                with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
+                    self.train_model = SimpleLstmModel(config=config, input_data=train, is_training=True)
+            # with tf.name_scope('Validation'):
+            #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
+            #         self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
+            # with tf.name_scope('Test'):
+            #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
+            #         self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)
 
             self.init_op = tf.global_variables_initializer()
 
@@ -190,15 +236,16 @@ class SimpleLstmPipeline(object):
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
                 train_eval = self.train_model.run_epoch(session)
-                val_eval = self.val_model.run_epoch(session)
-                print(
-                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_eval[0], train_eval[1], val_eval[0], val_eval[1]
-                    )
-                )
-            te_eval = self.te_model.run_epoch(session)
-
-            print(
-                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
-                    train_eval[1], val_eval[1], te_eval[1])
-            )
+                print('TRAIN (loss/acc): %.4f/%.2f%%' % (train_eval[0], train_eval[1]))
+                # val_eval = self.val_model.run_epoch(session)
+                # print(
+                #     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
+                #         train_eval[0], train_eval[1], val_eval[0], val_eval[1]
+                #     )
+                # )
+            # te_eval = self.te_model.run_epoch(session)
+            #
+            # print(
+            #     'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
+            #         train_eval[1], val_eval[1], te_eval[1])
+            # )

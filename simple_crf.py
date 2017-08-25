@@ -27,9 +27,9 @@ class SimpleCrfModel(object):
         # Features, output labels, and binary mask of valid timesteps
         self.x_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words, num_features])
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
-        self.w_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words])
+        self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
         # get sequences length from binary mask of valid timesteps
-        lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
+        # lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
@@ -49,10 +49,12 @@ class SimpleCrfModel(object):
         # Compute the log-likelihood of the gold sequences and keep the transition
         # params for inference at test time.
         log_likelihood, transition_params = crf.crf_log_likelihood(
-            unary_scores, self.y_batch, lengths_batch)
+            unary_scores, self.y_batch, self.l_batch)
         # Add a training op to tune the parameters.
 
-        self.decoding, _ = crf.crf_decode(unary_scores, transition_params, lengths_batch)
+        self.decoding, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
+
+
         self.loss = tf.reduce_mean(-log_likelihood)
 
         if not is_training:

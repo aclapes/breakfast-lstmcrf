@@ -82,6 +82,9 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
     dataset = dict()
     subsets = ['training', 'testing', 'validation']
     # subsets = ['training', 'testing']  # substitute for above line to merge validation and testing
+
+    class_counts = np.zeros((len(labels),), dtype=np.float32)
+
     for subset in subsets:
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
@@ -101,6 +104,11 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
             filepath = os.path.join(features_path + key.split('_')[-1], key + '.txt')
             x = read_features(filepath, pool_op, length=pool_size)
             y = generate_output(videos_data[key], labels, length=pool_size)
+
+            if subset == 'training':  # count to assign class weights later
+                ids, counts = np.unique(y, return_counts=True)
+                for id,c in zip(ids,counts): class_counts[id] += c
+
             dataset[subset]['video_features'][key] = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
             dataset[subset]['outputs'][key] = y
             dataset[subset]['lengths'][key] = len(dataset[subset]['outputs'][key])
@@ -147,17 +155,21 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
             chunks=(16,1),
             dtype='int32')
 
+    f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
+
     # Save some additional attributes
     f_dataset.attrs['no_classes'] = len(labels)
     f_dataset.attrs['pool_op'] = pool_op
     f_dataset.attrs['pool_size'] = pool_size
     f_dataset.attrs['stride'] = stride
+    # f_dataset.attrs['class_weights'] = (np.max(class_counts)/class_counts)
 
     f_dataset.close()
 
     # Sanity check
     f_dataset = h5py.File(output_file, 'r')
-    f_dataset.attrs['no_classes'] == len(labels)
+    # f_dataset.attrs['class_weights']
+    assert f_dataset.attrs['no_classes'] == len(labels)
     f_dataset.close()
 
 
@@ -196,7 +208,7 @@ if __name__ == '__main__':
         '--pool-op',
         type=str,
         dest='pool_op',
-        default='max',
+        default='avg',
         help=
         'Pooling operation (avg or max) (default: %(default)s)')
 
@@ -223,7 +235,7 @@ if __name__ == '__main__':
         '--output-file',
         type=str,
         dest='output_file',
-        default='/datasets/breakfast/fv/s1/dataset.h5',
+        default='dataset/dataset.h5',
         help=
         'Directory where hd5 file will be generated (default: %(default)s)')
 

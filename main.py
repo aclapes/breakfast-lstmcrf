@@ -103,6 +103,7 @@ if __name__ == '__main__':
         f_dataset['validation'],
         f_dataset['testing'],
         f_dataset.attrs['no_classes'],
+        f_dataset['class_weights'][:],
         batch_size=args.batch_size,
         learn_rate=args.learn_rate,
         num_epochs=args.num_epochs,
