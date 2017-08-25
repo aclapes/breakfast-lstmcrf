@@ -1,7 +1,7 @@
 #
 # DISCLAMER
 # ---------
-# This is an older but more cumbersome version of lstmcrf.py
+# This is an older but more cumbersome version of main.py
 # It hasn't been tested or revised for a while (it may not work as it).
 #
 
