@@ -236,13 +236,13 @@ class SimpleLstmPipeline(object):
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
                 train_eval = self.train_model.run_epoch(session)
-                print('TRAIN (loss/acc): %.4f/%.2f%%' % (train_eval[0], train_eval[1]))
-                # val_eval = self.val_model.run_epoch(session)
-                # print(
-                #     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                #         train_eval[0], train_eval[1], val_eval[0], val_eval[1]
-                #     )
-                # )
+                # print('TRAIN (loss/acc): %.4f/%.2f%%' % (train_eval[0], train_eval[1]))
+                val_eval = self.val_model.run_epoch(session)
+                print(
+                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
+                        train_eval[0], train_eval[1], val_eval[0], val_eval[1]
+                    )
+                )
             # te_eval = self.te_model.run_epoch(session)
             #
             # print(
