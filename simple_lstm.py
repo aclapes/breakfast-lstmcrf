@@ -118,15 +118,15 @@ class SimpleLstmModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        curr_learn_rate = tf.train.exponential_decay(learn_rate, global_step,
-                                                   100000, 0.9, staircase=True)
+        curr_learn_rate = tf.train.inverse_time_decay(learn_rate, global_step, decay_steps=1, decay_rate=0.5)
+
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
         self.train_op = self.optimizer.apply_gradients(
-            zip(self.grads, tvars, global_step=global_step)
+            zip(self.grads, tvars), global_step=global_step
         )
 
     def run_epoch(self, session):
@@ -176,7 +176,6 @@ class SimpleLstmModel(object):
 
             batch_loss[b] = vals['cost']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
-            print np.unique(vals['predictions'])
             progbar.update(b)
         progbar.finish()
 
