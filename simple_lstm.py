@@ -41,6 +41,7 @@ class SimpleLstmModel(object):
         num_features = config['num_features']
         optimizer_type = config['optimizer_type']
         learn_rate = config['learn_rate']
+        decay_rate = config['decay_rate']
         hidden_size = config['hidden_size']
         drop_prob = config['drop_prob']
 
@@ -118,7 +119,7 @@ class SimpleLstmModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        curr_learn_rate = tf.train.inverse_time_decay(learn_rate, global_step, decay_steps=1, decay_rate=0.5)
+        curr_learn_rate = tf.train.inverse_time_decay(learn_rate, global_step, decay_steps=1, decay_rate=decay_rate)
 
 
         self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
@@ -191,6 +192,7 @@ class SimpleLstmPipeline(object):
                  class_weights,
                  batch_size,
                  learn_rate,
+                 decay_rate,
                  num_epochs,
                  hidden_size,
                  drop_prob,
@@ -207,7 +209,8 @@ class SimpleLstmPipeline(object):
             hidden_size = hidden_size,
             drop_prob = drop_prob,
             optimizer_type = optimizer_type,
-            learn_rate = learn_rate
+            learn_rate = learn_rate,
+            decay_rate = decay_rate
         )
 
         test_config = config.copy()

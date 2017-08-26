@@ -41,6 +41,15 @@ if __name__ == '__main__':
         'Learning rate (default: %(default)s)')
 
     parser.add_argument(
+        '-dr',
+        '--decay-rate',
+        type=float,
+        dest='decay_rate',
+        default=0.05,
+        help=
+        'Decay rate for inverse time decay (default: %(default)s)')
+
+    parser.add_argument(
         '-e',
         '--num_epochs',
         type=int,
@@ -106,6 +115,7 @@ if __name__ == '__main__':
         f_dataset['class_weights'][:],
         batch_size=args.batch_size,
         learn_rate=args.learn_rate,
+        decay_rate=args.decay_rate,
         num_epochs=args.num_epochs,
         hidden_size=args.hidden_size,
         drop_prob=args.drop_prob,
