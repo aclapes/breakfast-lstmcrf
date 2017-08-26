@@ -61,8 +61,8 @@ class SimpleLstmModel(object):
 
         cell = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        # if is_training:
-        #     cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
+        if is_training:
+            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
 
         # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
         self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
@@ -117,12 +117,16 @@ class SimpleLstmModel(object):
         if not is_training:
             return
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
+        global_step = tf.Variable(0, trainable=False)
+        curr_learn_rate = tf.train.exponential_decay(learn_rate, global_step,
+                                                   100000, 0.9, staircase=True)
+
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
         self.train_op = self.optimizer.apply_gradients(
-            zip(self.grads, tvars)
+            zip(self.grads, tvars, global_step=global_step)
         )
 
     def run_epoch(self, session):
