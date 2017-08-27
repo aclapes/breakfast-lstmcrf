@@ -45,6 +45,8 @@ class SimpleLstmModel(object):
         hidden_size = config['hidden_size']
         drop_prob = config['drop_prob']
 
+        decay_steps = self.input_data['video_features'].shape[0] // 32
+
         # Graph construction
 
         # Features, output labels, and binary mask of valid timesteps
@@ -119,10 +121,11 @@ class SimpleLstmModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        curr_learn_rate = tf.train.inverse_time_decay(learn_rate, global_step, decay_steps=1, decay_rate=decay_rate)
+        self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate, global_step,
+                                                           decay_steps=decay_steps, decay_rate=decay_rate, staircase=True)
 
 
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.curr_learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
@@ -157,6 +160,7 @@ class SimpleLstmModel(object):
         }
         if self.is_training:
             fetches['train_op'] = self.train_op
+            fetches['curr_learn_rate'] = self.curr_learn_rate
             # fetches['grads'] = self.grads
 
         progbar = ProgressBar(max_value=num_batches)
@@ -174,6 +178,7 @@ class SimpleLstmModel(object):
 
             # print vals['final_state'].h[0,:3]
             state = vals['final_state']
+            print vals['curr_learn_rate']
 
             batch_loss[b] = vals['cost']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
