@@ -178,7 +178,8 @@ class SimpleLstmModel(object):
 
             # print vals['final_state'].h[0,:3]
             state = vals['final_state']
-            print vals['curr_learn_rate']
+            if self.is_training:
+                print vals['curr_learn_rate']
 
             batch_loss[b] = vals['cost']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
