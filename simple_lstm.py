@@ -68,8 +68,9 @@ class SimpleLstmModel(object):
         if is_training:
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
 
-        # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
-        self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+        self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+
 
         rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
             cell,
@@ -107,11 +108,14 @@ class SimpleLstmModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate,
-                                                           global_step,
-                                                           decay_steps=decay_steps,
-                                                           decay_rate=decay_rate,
-                                                           staircase=True)
+        # self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate,
+        #                                                    global_step,
+        #                                                    decay_steps=decay_steps,
+        #                                                    decay_rate=decay_rate,
+        #                                                    staircase=True)
+        boundaries = (np.array([1, 100, 1000], dtype=np.int32) * batch_size).tolist()
+        values = [1e-1, 1e-2, 1e-3, 1e-4]
+        self.curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
             self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
