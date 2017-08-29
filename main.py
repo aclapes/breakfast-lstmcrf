@@ -74,7 +74,7 @@ if __name__ == '__main__':
         '--clip-norm',
         type=float,
         dest='clip_norm',
-        default=1.0,
+        default=5.0,
         help=
         'Clipping gradients by norm above clip_norm (default: %(default)s)')
 

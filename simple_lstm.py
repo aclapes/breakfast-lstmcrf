@@ -68,8 +68,8 @@ class SimpleLstmModel(object):
         if is_training:
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
 
-        self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
-        # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+        # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
         rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
             cell,
