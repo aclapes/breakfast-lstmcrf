@@ -11,15 +11,15 @@ def read_data_generator(data, labels, lengths, batch_size=16):
     :return:
     '''
 
-    n_batches = len(data) // batch_size  # this will discard the last batch
+    n_batches = int(np.ceil(data.shape[0]/float(batch_size)))
 
-    for i in range(n_batches):
+    for i in range(n_batches+1):
         # prepare the batch
         x = data[(i*batch_size):((i+1)*batch_size),:,:] # batch features
         y = labels[(i * batch_size):((i + 1) * batch_size), :] # batch labels
-        l = lengths[(i * batch_size):((i + 1) * batch_size), :]  # not returned!
+        l = lengths[(i * batch_size):((i + 1) * batch_size)]  # not returned!
 
-        yield (x, y, np.squeeze(l))
+        yield (x, y, l)
 
 
 # def read_data_generator(data, labels, lengths, batch_size=16):

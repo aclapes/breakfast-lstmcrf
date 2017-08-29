@@ -24,14 +24,12 @@ class SimpleCrfModel(object):
         learn_rate = config['learn_rate']
         clip_norm = config['clip_norm']
 
-        decay_steps = self.input_data['video_features'].shape[0] // 32
-
         # Graph construction
 
         # Features, output labels, and binary mask of valid timesteps
-        self.x_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words, num_features])
-        self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
-        self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
+        self.x_batch = tf.placeholder(tf.float32, shape=[None, num_words, num_features])
+        self.y_batch = tf.placeholder(tf.int32, shape=[None, num_words])
+        self.l_batch = tf.placeholder(tf.int32, shape=[None])
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
@@ -69,20 +67,19 @@ class SimpleCrfModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate,
-                                                           global_step,
-                                                           decay_steps=decay_steps,
-                                                           decay_rate=decay_rate,
-                                                           staircase=True)
+        boundaries = (np.array([1, 100, 1000], dtype=np.int32) * batch_size).tolist()
+        values = [1e-1, 1e-2, 1e-3, 1e-4]
+        curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
-            self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
+            self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=curr_learn_rate)
         elif optimizer_type == 'adam':
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
 
         tvars = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clip_norm=clip_norm)
         self.train_op = self.optimizer.apply_gradients(zip(grads, tvars), global_step=global_step)
+
 
     def run_epoch(self, session):
         '''
@@ -91,13 +88,14 @@ class SimpleCrfModel(object):
         :param train_op:
         :return:
         '''
-        x = self.input_data['video_features']
-        y = self.input_data['outputs']
-        l = self.input_data['lengths']
 
-        self.reader = read_data_generator(x, y, l, batch_size=self.config['batch_size'])
+        self.reader = read_data_generator(self.input_data['video_features'],
+                                          self.input_data['outputs'],
+                                          self.input_data['lengths'][:, -1],
+                                          batch_size=self.config['batch_size'])
 
-        num_batches = x.shape[0] // self.config['batch_size']
+        num_instances = self.input_data['video_features'].shape[0]
+        num_batches = int(np.ceil(num_instances / float(self.config['batch_size'])))
         batch_loss = [None] * num_batches
         batch_accs = [None] * num_batches
 
@@ -114,8 +112,7 @@ class SimpleCrfModel(object):
 
             vals = session.run(
                 fetches,
-                feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]
-                }
+                feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]}
             )
             batch_loss[b] = vals['loss']
             batch_accs[b] = compute_framewise_accuracy(vals['decoding'], batch[1], batch[2])
@@ -178,18 +175,27 @@ class SimpleCrfPipeline(object):
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
+            train_evals = [None] * self.num_epochs
+            val_evals = [None] * self.num_epochs
+
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
-                train_eval = self.train_model.run_epoch(session)
-                val_eval = self.val_model.run_epoch(session)
+                train_evals[e] = self.train_model.run_epoch(session)
+                val_evals[e] = self.val_model.run_epoch(session)
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_eval[0], train_eval[1], val_eval[0], val_eval[1]
+                        train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
                     )
                 )
-            te_eval = self.te_model.run_epoch(session)
+                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
+                    _, te_acc = self.te_model.run_epoch(session)
+                    print('TE (acc): %.2f%%' % (te_acc))
 
+            tr_acc = np.mean([acc for _,acc in train_evals])
+            val_acc = np.mean([acc for _,acc in val_evals])
+
+            _, te_acc = self.te_model.run_epoch(session)
             print(
                 'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
-                    train_eval[1], val_eval[1], te_eval[1])
+                    tr_acc, val_acc, te_acc)
             )

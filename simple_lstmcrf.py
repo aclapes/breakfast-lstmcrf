@@ -6,29 +6,9 @@ from progressbar import ProgressBar
 from tensorflow.contrib import rnn
 import src.crf as crf  # master's version of tf.contrib.crf
 
-# from reader import read_data_generator
+from reader import read_data_generator
 from evaluation import compute_framewise_accuracy
 
-def read_data_generator(data, labels, lengths, batch_size=16):
-    '''
-    This generator function serves a batch of the dataset at each call.
-    See what a generator function is ;)
-    :param data:
-    :param labels:
-    :param lengths:
-    :param batch_size:
-    :return:
-    '''
-
-    n_batches = len(data) // batch_size  # this will discard the last batch
-
-    for i in range(n_batches):
-        # prepare the batch
-        x = data[(i*batch_size):((i+1)*batch_size),:,:] # batch features
-        y = labels[(i * batch_size):((i + 1) * batch_size), :] # batch labels
-        l = lengths[(i * batch_size):((i + 1) * batch_size), :]  # not returned!
-
-        yield (x, y, l[:,-1])
 
 class SimpleLstmcrfModel(object):
     def __init__(self, config, input_data, is_training):
@@ -46,8 +26,6 @@ class SimpleLstmcrfModel(object):
         hidden_size = config['hidden_size']
         drop_prob = config['drop_prob']
         clip_norm = config['clip_norm']
-
-        decay_steps = self.input_data['video_features'].shape[0] // 32
 
         # Graph construction
 
@@ -76,8 +54,8 @@ class SimpleLstmcrfModel(object):
                                                     variational_recurrent=True,
                                                     dtype=tf.float32)
 
-        self.initial_state_fw = cell_fw.zero_state(batch_size, dtype=np.float32)
-        self.initial_state_bw = cell_bw.zero_state(batch_size, dtype=np.float32)
+        self.initial_state_fw = cell_fw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
+        self.initial_state_bw = cell_bw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
         # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
         rnn_outputs, self.final_state = tf.nn.bidirectional_dynamic_rnn(
@@ -114,12 +92,12 @@ class SimpleLstmcrfModel(object):
         global_step = tf.Variable(0, trainable=False)
         boundaries = (np.array([1, 100, 1000], dtype=np.int32) * batch_size).tolist()
         values = [1e-1, 1e-2, 1e-3, 1e-4]
-        self.curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
+        curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
-            self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
+            self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=curr_learn_rate)
         elif optimizer_type == 'adam':
-            self.optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
 
         tvars = tf.trainable_variables()
         self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clip_norm=clip_norm)
@@ -135,10 +113,11 @@ class SimpleLstmcrfModel(object):
 
         self.reader = read_data_generator(self.input_data['video_features'],
                                           self.input_data['outputs'],
-                                          self.input_data['lengths'],
+                                          self.input_data['lengths'][:, -1],
                                           batch_size=self.config['batch_size'])
 
-        num_batches = self.input_data['video_features'].shape[0] // self.config['batch_size']
+        num_instances = self.input_data['video_features'].shape[0]
+        num_batches = int(np.ceil(num_instances / float(self.config['batch_size'])))
         batch_loss = [None] * num_batches
         batch_accs = [None] * num_batches
 
@@ -248,12 +227,12 @@ class SimpleLstmcrfPipeline(object):
                         train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
                     )
                 )
-                if e in [1, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
+                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
                     _, te_acc = self.te_model.run_epoch(session)
                     print('TE (acc): %.2f%%' % (te_acc))
 
             tr_acc = np.mean([acc for _,acc in train_evals])
-            val_acc = np.mean([acc for _,acc in train_evals])
+            val_acc = np.mean([acc for _,acc in val_evals])
 
             _, te_acc = self.te_model.run_epoch(session)
             print(
