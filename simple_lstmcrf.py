@@ -69,10 +69,12 @@ class SimpleLstmcrfModel(object):
         if is_training:
             cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
                                                     output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True)
+                                                    variational_recurrent=True,
+                                                    dtype=tf.float32)
             cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw,
                                                     output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True)
+                                                    variational_recurrent=True,
+                                                    dtype=tf.float32)
 
         self.initial_state_fw = cell_fw.zero_state(batch_size, dtype=np.float32)
         self.initial_state_bw = cell_bw.zero_state(batch_size, dtype=np.float32)
