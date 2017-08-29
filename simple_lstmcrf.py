@@ -56,36 +56,42 @@ class SimpleLstmcrfModel(object):
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
         self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
 
-        self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
-
-        classweights = tf.expand_dims(tf.constant(config['class_weights']), axis=0)
+        # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
+        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
+                                 reuse=tf.get_variable_scope().reuse)
+        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
         if is_training:
-            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
+            cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw, output_keep_prob=1 - drop_prob)
+            cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw, output_keep_prob=1 - drop_prob)
 
-        # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
-        self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+        self.initial_state_fw = cell_fw.zero_state(batch_size, dtype=np.float32)
+        self.initial_state_bw = cell_bw.zero_state(batch_size, dtype=np.float32)
+        # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
-        rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
-            cell,
+        rnn_outputs, self.final_state = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw,
+            cell_bw,
             x_batch,
             dtype=tf.float32,
-            initial_state=self.initial_state,  # statefull rnn
+            initial_state_fw=self.initial_state_fw,
+            initial_state_bw=self.initial_state_bw,
             sequence_length=self.l_batch  # do not process padded parts
         )
 
-        matricied_x = tf.reshape(rnn_outputs, [-1, hidden_size])
-        softmax_w = tf.get_variable('softmax_w', [hidden_size, no_classes], dtype=tf.float32)
+        rnn_outputs = tf.concat(rnn_outputs, axis=2)
+
+        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
+        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
-        unary_scores = tf.reshape(logits, [-1, no_classes])
+        unary_scores = tf.reshape(logits, [-1, num_words, no_classes])
 
         # Compute the log-likelihood of the gold sequences and keep the transition
         # params for inference at test time.
@@ -94,17 +100,15 @@ class SimpleLstmcrfModel(object):
 
         # compute loss and framewise predictions
         self.loss = tf.reduce_mean(-log_likelihood)
-        self.decoding, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
+        self.predictions, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
 
         if not is_training:
             return
 
         global_step = tf.Variable(0, trainable=False)
-        self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate,
-                                                           global_step,
-                                                           decay_steps=decay_steps,
-                                                           decay_rate=decay_rate,
-                                                           staircase=True)
+        boundaries = (np.array([1, 100, 1000], dtype=np.int32) * batch_size).tolist()
+        values = [1e-1, 1e-2, 1e-3, 1e-4]
+        self.curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
             self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
@@ -133,16 +137,16 @@ class SimpleLstmcrfModel(object):
         batch_accs = [None] * num_batches
 
         # state = session.run(self.initial_state)
-        state = np.zeros((2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
+        # state = np.zeros((2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
 
         fetches = {
-            'cost': self.loss,
-            'final_state': self.final_state,
+            'loss': self.loss,
+            # 'final_state': self.final_state,
             'predictions': self.predictions,
         }
         if self.is_training:
             fetches['train_op'] = self.train_op
-            fetches['curr_learn_rate'] = self.curr_learn_rate
+            # fetches['curr_learn_rate'] = self.curr_learn_rate
             # fetches['grads'] = self.grads
 
         progbar = ProgressBar(max_value=num_batches)
@@ -152,17 +156,17 @@ class SimpleLstmcrfModel(object):
             # c, h = self.initial_state
             # feed_dict[c] = state.c
             # feed_dict[h] = state.h
-            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2],
-                         self.state_placeholder: state}
+            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]}
+                         # self.state_placeholder: state}
 
             vals = session.run(fetches=fetches, feed_dict=feed_dict)
 
             # print vals['final_state'].h[0,:3]
-            state = vals['final_state']
-            if self.is_training:
-                print vals['curr_learn_rate']
+            # state = vals['final_state']
+            # if self.is_training:
+                # print vals['curr_learn_rate']
 
-            batch_loss[b] = vals['cost']
+            batch_loss[b] = vals['loss']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
             progbar.update(b)
         progbar.finish()
@@ -207,8 +211,7 @@ class SimpleLstmcrfPipeline(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            initializer = tf.random_uniform_initializer(-0.1,
-                                                        0.1)
+            initializer = tf.random_uniform_initializer(-0.1, 0.1)
 
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
@@ -223,8 +226,8 @@ class SimpleLstmcrfPipeline(object):
             self.init_op = tf.global_variables_initializer()
 
 
-    def run(self):
-        with tf.Session(graph=self.graph) as session:
+    def run(self, gpu_options):
+        with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
             for e in range(self.num_epochs):
