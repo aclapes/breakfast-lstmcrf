@@ -170,6 +170,8 @@ if __name__ == '__main__':
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,
             num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
             optimizer_type=args.optimizer_type,
             clip_norm=args.clip_norm
         )

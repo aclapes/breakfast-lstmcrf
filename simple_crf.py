@@ -39,9 +39,15 @@ class SimpleCrfModel(object):
 
         # Compute unary scores from a linear layer.
         matricied_x = tf.reshape(x_batch, [-1, num_features])
-        softmax_w = tf.get_variable('softmax_w', [num_features, no_classes], dtype=tf.float32)
+
+        hidden_w = tf.get_variable('hidden_w', [num_features, config['hidden_size']], dtype=tf.float32)
+        hidden_b = tf.get_variable('hidden_b', [config['hidden_size']], dtype=tf.float32, initializer=tf.zeros_initializer())
+        hidden_activations = tf.matmul(matricied_x, hidden_w) + hidden_b
+        hidden_activations = tf.layers.dropout(hidden_activations, rate=config['drop_prob'], training=config['drop_prob'])
+
+        softmax_w = tf.get_variable('softmax_w', [config['hidden_size'], no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.zeros_initializer())
-        logits = tf.matmul(matricied_x, softmax_w) + softmax_b
+        logits = tf.matmul(hidden_activations, softmax_w) + softmax_b
 
         normalized_logits = tf.nn.softmax(logits)
         unary_scores = tf.reshape(
@@ -130,6 +136,8 @@ class SimpleCrfPipeline(object):
                  learn_rate,
                  decay_rate,
                  num_epochs,
+                 hidden_size,
+                 drop_prob,
                  optimizer_type='adam',
                  clip_norm=1.0):
 
@@ -141,6 +149,8 @@ class SimpleCrfPipeline(object):
             num_words = train['video_features'].shape[1],
             num_features = train['video_features'].shape[2],
             optimizer_type = optimizer_type,
+            hidden_size = hidden_size,
+            drop_prob = drop_prob,
             decay_rate = decay_rate,
             learn_rate = learn_rate,
             clip_norm = clip_norm
@@ -164,8 +174,8 @@ class SimpleCrfPipeline(object):
             self.init_op = tf.global_variables_initializer()
 
 
-    def run(self):
-        with tf.Session(graph=self.graph) as session:
+    def run(self, gpu_options):
+        with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
             for e in range(self.num_epochs):

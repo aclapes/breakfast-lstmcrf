@@ -52,7 +52,6 @@ from __future__ import print_function
 
 import numpy as np
 
-import tensorflow as tf
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_array_ops
