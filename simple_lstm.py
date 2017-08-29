@@ -100,7 +100,7 @@ class SimpleLstmModel(object):
         mask = tf.sequence_mask(self.l_batch)
         masked_xent = tf.boolean_mask(xent, mask)
 
-        self.cost = tf.reduce_sum(masked_xent)
+        self.cost = tf.reduce_mean(masked_xent)
 
         self.predictions = tf.argmax(tf.reshape(logits, [-1,num_words,no_classes]), 2)
 
