@@ -55,7 +55,7 @@ class SimpleLstmModel(object):
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
         self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
 
-        self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
+        self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
 
         classweights = tf.expand_dims(tf.constant(config['class_weights']), axis=0)
 
@@ -96,10 +96,8 @@ class SimpleLstmModel(object):
         # )
 
 
-
-        rnn_outputs = None
-        matricied_x = tf.reshape(rnn_outputs, [-1, hidden_size])
-        softmax_w = tf.get_variable('softmax_w', [hidden_size, no_classes], dtype=tf.float32)
+        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
+        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
@@ -162,7 +160,7 @@ class SimpleLstmModel(object):
         batch_accs = [None] * num_batches
 
         # state = session.run(self.initial_state)
-        state = np.zeros((2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
+        state = np.zeros((2, 2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
 
         fetches = {
             'cost': self.loss,
