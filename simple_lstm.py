@@ -35,6 +35,8 @@ class SimpleLstmModel(object):
         self.input_data = input_data
         self.is_training = is_training
 
+        num_layers = 2
+
         no_classes = config['no_classes']
         batch_size = config['batch_size']
         num_words = config['num_words']
@@ -63,29 +65,32 @@ class SimpleLstmModel(object):
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        def attn_cell():
+            cell = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
-                                 reuse=tf.get_variable_scope().reuse)
-        if is_training:
-            cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw, output_keep_prob=1 - drop_prob)
-            cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw, output_keep_prob=1 - drop_prob)
+            if is_training:
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1 - drop_prob)
+            return cell
 
-        self.initial_state_fw = cell_fw.zero_state(batch_size, dtype=np.float32)
-        self.initial_state_bw = cell_bw.zero_state(batch_size, dtype=np.float32)
+        cells_fw = [attn_cell() for _ in range(num_layers)]
+        cells_bw = [attn_cell() for _ in range(num_layers)]
+
+        self.initial_state_fw = [cell.zero_state(batch_size, dtype=np.float32) for cell in cells_fw]
+        self.initial_state_bw = [cell.zero_state(batch_size, dtype=np.float32) for cell in cells_bw]
         # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
-        rnn_outputs, self.final_state  = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw,
-            cell_bw,
+        rnn_outputs, final_state_fw, final_state_bw  = tf.contrib.rnn.stack_bidirectional_dynamic_rnn(
+            cells_fw,
+            cells_bw,
             x_batch,
             dtype=tf.float32,
-            initial_state_fw=self.initial_state_fw,
-            initial_state_bw=self.initial_state_bw,
+            initial_states_fw=self.initial_state_fw,
+            initial_states_bw=self.initial_state_bw,
             sequence_length=self.l_batch
         )
+        # self.final_state = (final_state_fw, final_state_bw)
 
-        rnn_outputs = tf.concat(rnn_outputs, 2)
+        # rnn_outputs = tf.concat(rnn_outputs, 2)
 
         # rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
         #     cell,
@@ -164,7 +169,7 @@ class SimpleLstmModel(object):
 
         fetches = {
             'cost': self.loss,
-            'final_state': self.final_state,
+            # 'final_state': self.final_state,
             'predictions': self.predictions,
         }
         if self.is_training:
@@ -179,13 +184,13 @@ class SimpleLstmModel(object):
             # c, h = self.initial_state
             # feed_dict[c] = state.c
             # feed_dict[h] = state.h
-            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2],
-                         self.state_placeholder: state}
+            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]}
+                         # self.state_placeholder: state}
 
             vals = session.run(fetches=fetches, feed_dict=feed_dict)
 
             # print vals['final_state'].h[0,:3]
-            state = vals['final_state']
+            # state = vals['final_state']
             if self.is_training:
                 print vals['curr_learn_rate']
 
