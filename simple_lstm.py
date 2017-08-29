@@ -57,9 +57,7 @@ class SimpleLstmModel(object):
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
         self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
 
-        self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
-
-        classweights = tf.expand_dims(tf.constant(config['class_weights']), axis=0)
+        # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
@@ -101,7 +99,7 @@ class SimpleLstmModel(object):
         # )
 
 
-        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
+        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])  # using bidirectional -> 2x hidden_size
         softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
@@ -111,6 +109,8 @@ class SimpleLstmModel(object):
         # ---
         y_onehot = tf.one_hot(self.y_batch, no_classes, on_value=1.0, off_value=0.0, axis=-1)
         y_onehot_matricied = tf.reshape(y_onehot, [-1, no_classes])
+
+        classweights = tf.expand_dims(tf.constant(config['class_weights']), axis=0)
         weight_per_label = tf.transpose(tf.matmul(y_onehot_matricied, tf.transpose(classweights)))
         xent = tf.multiply(weight_per_label,
                       tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_onehot_matricied))
@@ -255,8 +255,8 @@ class SimpleLstmPipeline(object):
             self.init_op = tf.global_variables_initializer()
 
 
-    def run(self):
-        with tf.Session(graph=self.graph) as session:
+    def run(self, gpu_options):
+        with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
             for e in range(self.num_epochs):

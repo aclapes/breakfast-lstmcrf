@@ -1,5 +1,6 @@
 import h5py
 import argparse
+import tensorflow as tf
 
 # from crf import CrfPipeline
 # from lstm import LstmPipeline
@@ -108,6 +109,14 @@ if __name__ == '__main__':
         help=
         'Dropout probability (default: %(default)s)')
     # -----------------------------------------------
+    parser.add_argument(
+        '-G',
+        '--gpu-memory',
+        type=float,
+        dest='gpu_memory',
+        default=0.9,
+        help=
+        'GPU memory to reserve (default: %(default)s)')
 
     args = parser.parse_args()
     print args
@@ -170,7 +179,8 @@ if __name__ == '__main__':
     # -----------------------------------------------
     # RUN
     # -----------------------------------------------
-    m.run()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory)
+    m.run(gpu_options)
     # -----------------------------------------------
 
     f_dataset.close()
