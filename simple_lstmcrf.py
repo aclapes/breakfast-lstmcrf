@@ -62,9 +62,9 @@ class SimpleLstmcrfModel(object):
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
+        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
+        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
         if is_training:
             cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
@@ -223,9 +223,9 @@ class SimpleLstmcrfPipeline(object):
             with tf.name_scope('Validation'):
                 with tf.variable_scope('Model', reuse=True, initializer=initializer):
                     self.val_model = SimpleLstmcrfModel(config=config, input_data=val, is_training=False)
-            # with tf.name_scope('Test'):
-            #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
-            #         self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)
+            with tf.name_scope('Test'):
+                with tf.variable_scope('Model', reuse=True, initializer=initializer):
+                    self.te_model = SimpleLstmcrfModel(config=test_config, input_data=te, is_training=False)
 
             self.init_op = tf.global_variables_initializer()
 
