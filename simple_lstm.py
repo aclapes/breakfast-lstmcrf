@@ -44,6 +44,7 @@ class SimpleLstmModel(object):
         decay_rate = config['decay_rate']
         hidden_size = config['hidden_size']
         drop_prob = config['drop_prob']
+        clip_norm = config['clip_norm']
 
         decay_steps = self.input_data['video_features'].shape[0] // 32
 
@@ -128,7 +129,7 @@ class SimpleLstmModel(object):
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.curr_learn_rate)
 
         tvars = tf.trainable_variables()
-        self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), 5.0)
+        self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), clip_norm=clip_norm)
         self.train_op = self.optimizer.apply_gradients(
             zip(self.grads, tvars), global_step=global_step
         )
@@ -202,7 +203,8 @@ class SimpleLstmPipeline(object):
                  num_epochs,
                  hidden_size,
                  drop_prob,
-                 optimizer_type='adam'):
+                 optimizer_type='adam',
+                 clip_norm=1.0):
 
         self.num_epochs = num_epochs
 
@@ -215,6 +217,7 @@ class SimpleLstmPipeline(object):
             hidden_size = hidden_size,
             drop_prob = drop_prob,
             optimizer_type = optimizer_type,
+            clip_norm = clip_norm,
             learn_rate = learn_rate,
             decay_rate = decay_rate
         )

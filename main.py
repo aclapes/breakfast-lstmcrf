@@ -68,6 +68,15 @@ if __name__ == '__main__':
         'Optimizer type (sgd or adam) (default: %(default)s)')
 
     parser.add_argument(
+        '-c',
+        '--clip-norm',
+        type=float,
+        dest='clip_norm',
+        default=1.0,
+        help=
+        'Clipping gradients by norm above clip_norm (default: %(default)s)')
+
+    parser.add_argument(
         '-M',
         '--model-type',
         type=str,
@@ -119,7 +128,8 @@ if __name__ == '__main__':
         num_epochs=args.num_epochs,
         hidden_size=args.hidden_size,
         drop_prob=args.drop_prob,
-        optimizer_type=args.optimizer_type
+        optimizer_type=args.optimizer_type,
+        clip_norm=args.clip_norm
     )
     m.run()
     quit()
