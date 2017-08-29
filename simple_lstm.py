@@ -79,7 +79,7 @@ class SimpleLstmModel(object):
             cell_fw,
             cell_bw,
             x_batch,
-            dypte=tf.float32,
+            dtype=tf.float32,
             initial_state_fw=self.initial_state_fw,
             initial_state_bw=self.initial_state_bw,
             sequence_length=self.l_batch
