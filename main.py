@@ -1,11 +1,13 @@
 import h5py
 import argparse
 
-from crf import CrfPipeline
-from lstm import LstmPipeline
-from lstmcrf import LstmCrfPipeline
+# from crf import CrfPipeline
+# from lstm import LstmPipeline
+# from lstmcrf import LstmCrfPipeline
 
-from simple_lstm import SimpleLstmPipeline # debug
+from simple_lstm import SimpleLstmPipeline
+from simple_crf import SimpleCrfPipeline
+from simple_lstmcrf import SimpleLstmcrfPipeline
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
@@ -116,61 +118,51 @@ if __name__ == '__main__':
     for key in f_dataset.attrs.keys():
         print('%s : %s' % (key, str(f_dataset.attrs[key])))
 
-    m = SimpleLstmPipeline(
-        f_dataset['training'],
-        f_dataset['validation'],
-        f_dataset['testing'],
-        f_dataset.attrs['no_classes'],
-        f_dataset['class_weights'][:],
-        batch_size=args.batch_size,
-        learn_rate=args.learn_rate,
-        decay_rate=args.decay_rate,
-        num_epochs=args.num_epochs,
-        hidden_size=args.hidden_size,
-        drop_prob=args.drop_prob,
-        optimizer_type=args.optimizer_type,
-        clip_norm=args.clip_norm
-    )
-    m.run()
-    quit()
-
     # Create a model (choosen via argument passing)
     if args.model_type == 'lstmcrf':
-        m = LstmCrfPipeline(
+        m = SimpleLstmcrfPipeline(
             f_dataset['training'],
             f_dataset['validation'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
+            f_dataset['class_weights'][:],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
             num_epochs=args.num_epochs,
             hidden_size=args.hidden_size,
             drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
         )
     elif args.model_type == 'lstm':
-        m = LstmPipeline(
+        m = SimpleLstmPipeline(
             f_dataset['training'],
-            f_dataset['testing'],
+            f_dataset['validation'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
+            f_dataset['class_weights'][:],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
             num_epochs=args.num_epochs,
             hidden_size=args.hidden_size,
             drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
         )
     elif args.model_type == 'crf':
-        m = CrfPipeline(
+        m = SimpleCrfPipeline(
             f_dataset['training'],
             f_dataset['validation'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
             num_epochs=args.num_epochs,
-            optimizer_type=args.optimizer_type
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
         )
     else:
         raise NotImplementedError('Please specify a valid model (-M <model_type>).')

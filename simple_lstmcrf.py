@@ -4,6 +4,7 @@ import tensorflow as tf
 from progressbar import ProgressBar
 
 from tensorflow.contrib import rnn
+import src.crf as crf  # master's version of tf.contrib.crf
 
 # from reader import read_data_generator
 from evaluation import compute_framewise_accuracy
@@ -29,7 +30,7 @@ def read_data_generator(data, labels, lengths, batch_size=16):
 
         yield (x, y, np.squeeze(l))
 
-class SimpleLstmModel(object):
+class SimpleLstmcrfModel(object):
     def __init__(self, config, input_data, is_training):
         self.config = config
         self.input_data = input_data
@@ -63,13 +64,13 @@ class SimpleLstmModel(object):
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        cell = rnn.BasicLSTMCell(hidden_size, forget_bias=0.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
         if is_training:
             cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
 
-        self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
-        # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
+        # self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
         rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
             cell,
@@ -84,24 +85,16 @@ class SimpleLstmModel(object):
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
-        # Class weighting
-        # See: https://stackoverflow.com/questions/35155655/loss-function-for-class-imbalanced-binary-classifier-in-tensor-flow#answer-38912982
-        # ---
-        y_onehot = tf.one_hot(self.y_batch, no_classes, on_value=1.0, off_value=0.0, axis=-1)
-        y_onehot_matricied = tf.reshape(y_onehot, [-1, no_classes])
-        weight_per_label = tf.transpose(tf.matmul(y_onehot_matricied, tf.transpose(classweights)))
-        xent = tf.multiply(weight_per_label,
-                      tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_onehot_matricied))
-        # ---
+        unary_scores = tf.reshape(logits, [-1, no_classes])
 
-        # reshape to sequence format and mask padded timesteps
-        xent = tf.reshape(xent, [-1,num_words])
-        mask = tf.sequence_mask(self.l_batch)
-        masked_xent = tf.boolean_mask(xent, mask)
+        # Compute the log-likelihood of the gold sequences and keep the transition
+        # params for inference at test time.
+        log_likelihood, transition_params = crf.crf_log_likelihood(
+            unary_scores, self.y_batch, self.l_batch)
 
         # compute loss and framewise predictions
-        self.loss = tf.reduce_mean(masked_xent)
-        self.predictions = tf.argmax(tf.reshape(logits, [-1,num_words,no_classes]), 2)
+        self.loss = tf.reduce_mean(-log_likelihood)
+        self.decoding, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
 
         if not is_training:
             return
@@ -177,7 +170,7 @@ class SimpleLstmModel(object):
         return np.mean(batch_loss), np.mean(batch_accs)
 
 
-class SimpleLstmPipeline(object):
+class SimpleLstmcrfPipeline(object):
     def __init__(self,
                  train,
                  val,
@@ -219,10 +212,10 @@ class SimpleLstmPipeline(object):
 
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
-                    self.train_model = SimpleLstmModel(config=config, input_data=train, is_training=True)
+                    self.train_model = SimpleLstmcrfModel(config=config, input_data=train, is_training=True)
             with tf.name_scope('Validation'):
                 with tf.variable_scope('Model', reuse=True, initializer=initializer):
-                    self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
+                    self.val_model = SimpleLstmcrfModel(config=config, input_data=val, is_training=False)
             # with tf.name_scope('Test'):
             #     with tf.variable_scope('Model', reuse=True, initializer=initializer):
             #         self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)

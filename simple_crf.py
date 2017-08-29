@@ -20,7 +20,11 @@ class SimpleCrfModel(object):
         num_words = config['num_words']
         num_features = config['num_features']
         optimizer_type = config['optimizer_type']
+        decay_rate = config['decay_rate']
         learn_rate = config['learn_rate']
+        clip_norm = config['clip_norm']
+
+        decay_steps = self.input_data['video_features'].shape[0] // 32
 
         # Graph construction
 
@@ -28,12 +32,10 @@ class SimpleCrfModel(object):
         self.x_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words, num_features])
         self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
         self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
-        # get sequences length from binary mask of valid timesteps
-        # lengths_batch = tf.cast(tf.reduce_sum(self.w_batch, axis=1), dtype=tf.int32)
 
         x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
-            x_batch = tf.nn.dropout(x_batch, keep_prob=0.8)  # TODO: experiment with this dropout
+            x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
         # Compute unary scores from a linear layer.
         matricied_x = tf.reshape(x_batch, [-1, num_features])
@@ -60,14 +62,21 @@ class SimpleCrfModel(object):
         if not is_training:
             return
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
+        global_step = tf.Variable(0, trainable=False)
+        self.curr_learn_rate = tf.train.inverse_time_decay(learn_rate,
+                                                           global_step,
+                                                           decay_steps=decay_steps,
+                                                           decay_rate=decay_rate,
+                                                           staircase=True)
+
+        if optimizer_type == 'sgd':
+            self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=learn_rate)
+        elif optimizer_type == 'adam':
+            self.optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate)
 
         tvars = tf.trainable_variables()
-        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), 5.0)
-        self.train_op = optimizer.apply_gradients(
-            zip(grads, tvars),
-            global_step=tf.contrib.framework.get_or_create_global_step()
-        )
+        grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clip_norm=clip_norm)
+        self.train_op = self.optimizer.apply_gradients(zip(grads, tvars), global_step=global_step)
 
     def run_epoch(self, session):
         '''
@@ -99,7 +108,7 @@ class SimpleCrfModel(object):
 
             vals = session.run(
                 fetches,
-                feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.w_batch: batch[2]
+                feed_dict={self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]
                 }
             )
             batch_loss[b] = vals['loss']
@@ -119,8 +128,10 @@ class SimpleCrfPipeline(object):
                  no_classes,
                  batch_size,
                  learn_rate,
+                 decay_rate,
                  num_epochs,
-                 optimizer_type='adam'):
+                 optimizer_type='adam',
+                 clip_norm=1.0):
 
         self.num_epochs = num_epochs
 
@@ -130,7 +141,9 @@ class SimpleCrfPipeline(object):
             num_words = train['video_features'].shape[1],
             num_features = train['video_features'].shape[2],
             optimizer_type = optimizer_type,
-            learn_rate = learn_rate
+            decay_rate = decay_rate,
+            learn_rate = learn_rate,
+            clip_norm = clip_norm
         )
 
         test_config = config.copy()
@@ -138,7 +151,7 @@ class SimpleCrfPipeline(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            initializer = tf.random_uniform_initializer(-0.05, 0.05)
+            initializer = tf.random_uniform_initializer(-0.1, 0.1)
             with tf.variable_scope('Model', reuse=False, initializer=initializer):
                 self.train_model = SimpleCrfModel(config=config, input_data=train, is_training=True)
 
