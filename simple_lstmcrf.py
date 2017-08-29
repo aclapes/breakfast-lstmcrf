@@ -236,19 +236,27 @@ class SimpleLstmcrfPipeline(object):
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
+            train_evals = [None] * self.num_epochs
+            val_evals = [None] * self.num_epochs
+
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
-                train_eval = self.train_model.run_epoch(session)
-                # print('TRAIN (loss/acc): %.4f/%.2f%%' % (train_eval[0], train_eval[1]))
-                val_eval = self.val_model.run_epoch(session)
+                train_evals[e] = self.train_model.run_epoch(session)
+                val_evals[e] = self.val_model.run_epoch(session)
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_eval[0], train_eval[1], val_eval[0], val_eval[1]
+                        train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
                     )
                 )
-            te_eval = self.te_model.run_epoch(session)
+                if e in [1, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
+                    _, te_acc = self.te_model.run_epoch(session)
+                    print('TE (acc): %.2f%%' % (te_acc))
 
+            tr_acc = np.mean([acc for _,acc in train_evals])
+            val_acc = np.mean([acc for _,acc in train_evals])
+
+            _, te_acc = self.te_model.run_epoch(session)
             print(
                 'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
-                    train_eval[1], val_eval[1], te_eval[1])
+                    tr_acc, val_acc, te_acc)
             )
