@@ -28,7 +28,7 @@ def read_data_generator(data, labels, lengths, batch_size=16):
         y = labels[(i * batch_size):((i + 1) * batch_size), :] # batch labels
         l = lengths[(i * batch_size):((i + 1) * batch_size), :]  # not returned!
 
-        yield (x, y, np.squeeze(l))
+        yield (x, y, l[:,-1])
 
 class SimpleLstmcrfModel(object):
     def __init__(self, config, input_data, is_training):
@@ -52,9 +52,9 @@ class SimpleLstmcrfModel(object):
         # Graph construction
 
         # Features, output labels, and binary mask of valid timesteps
-        self.x_batch = tf.placeholder(tf.float32, shape=[batch_size, num_words, num_features])
-        self.y_batch = tf.placeholder(tf.int32, shape=[batch_size, num_words])
-        self.l_batch = tf.placeholder(tf.int32, shape=[batch_size])
+        self.x_batch = tf.placeholder(tf.float32, shape=[None, num_words, num_features])
+        self.y_batch = tf.placeholder(tf.int32, shape=[None, num_words])
+        self.l_batch = tf.placeholder(tf.int32, shape=[None])
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
 
@@ -246,9 +246,9 @@ class SimpleLstmcrfPipeline(object):
                         train_eval[0], train_eval[1], val_eval[0], val_eval[1]
                     )
                 )
-            # te_eval = self.te_model.run_epoch(session)
-            #
-            # print(
-            #     'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
-            #         train_eval[1], val_eval[1], te_eval[1])
-            # )
+            te_eval = self.te_model.run_epoch(session)
+
+            print(
+                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
+                    train_eval[1], val_eval[1], te_eval[1])
+            )
