@@ -63,23 +63,41 @@ class SimpleLstmModel(object):
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+                                 reuse=tf.get_variable_scope().reuse)
+        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
         if is_training:
-            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=1-drop_prob)
+            cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw, output_keep_prob=1 - drop_prob)
+            cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw, output_keep_prob=1 - drop_prob)
 
-        self.initial_state = cell.zero_state(batch_size, dtype=np.float32)
+        self.initial_state_fw = cell_fw.zero_state(batch_size, dtype=np.float32)
+        self.initial_state_bw = cell_bw.zero_state(batch_size, dtype=np.float32)
         # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
-
-        rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
-            cell,
+        rnn_outputs, self.final_state  = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw,
+            cell_bw,
             x_batch,
-            dtype=tf.float32,
-            initial_state=self.initial_state,  # statefull rnn
-            sequence_length=self.l_batch  # do not process padded parts
+            dypte=tf.float32,
+            initial_state_fw=self.initial_state_fw,
+            initial_state_bw=self.initial_state_bw,
+            sequence_length=self.l_batch
         )
 
+        rnn_outputs = tf.concat(rnn_outputs, 2)
+
+        # rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
+        #     cell,
+        #     x_batch,
+        #     dtype=tf.float32,
+        #     initial_state=self.initial_state,  # statefull rnn
+        #     sequence_length=self.l_batch  # do not process padded parts
+        # )
+
+
+
+        rnn_outputs = None
         matricied_x = tf.reshape(rnn_outputs, [-1, hidden_size])
         softmax_w = tf.get_variable('softmax_w', [hidden_size, no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
