@@ -75,7 +75,7 @@ This instruction trains, validates, and tests a LSTMCRF model (specified by ```-
   a way to do it (see "Data preparation" section below). 
 
 You can pass multiple GPUs through ```CUDA_VISIBLE_DEVICES``` (e.g. "0,2,5"). However, the code is not multi-GPU, 
-so you need to choose one particular device, e.g. 0-th.
+so you may want to choose one and only particular device, e.g. 0-th.
 
 
 ### Notes on docker usage
