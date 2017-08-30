@@ -107,8 +107,8 @@ class SimpleLstmModel(object):
             return
 
         global_step = tf.Variable(0, trainable=False)
-        boundaries = (np.array([1, 100, 1000], dtype=np.int32) * batch_size).tolist()
-        values = [1e-1, 1e-2, 1e-3, 1e-4]
+        boundaries = (np.array([100, 1000], dtype=np.int32) * batch_size).tolist()
+        values = [1e-2, 1e-3, 1e-4]
         curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
