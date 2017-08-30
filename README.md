@@ -98,7 +98,8 @@ docker attach <container_id>
 ## Data preparation
 
 To run the code in ```main.py```, you need to construct first a dataset containing the features with a certain format. 
-To do this, we provide create_X_breakfast_dataset python scripts in ```dataset``` directory. 
+To do this, we provide breakfast_from_X.py python scripts in ```dataset``` directory. Where X is the kind of features
+you want to build the dataset from. Currently, only FV are supported.
 
 This is an example of how to use ```breakfast_from_fv.py```:
 
