@@ -18,7 +18,7 @@ import h5py
 import argparse
 import json
 from progressbar import ProgressBar
-import crf
+import src.crf as crf
 
 
 from tensorflow.python.ops import variable_scope as vs
@@ -361,7 +361,7 @@ class LstmCrfModel(object):
                     # Iterate over sequences in a batch
                     for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
                         # Decode the sequence
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        pred, _ = crf.viterbi_decode(unary_scores[:length, :], transition_params)
                         # Count per-timestep hits
                         correct_labels += np.sum(np.equal(pred, y_true[:length]))
                         total_labels += length
@@ -396,7 +396,7 @@ class LstmCrfModel(object):
                     correct_labels = 0.
                     total_labels = 0.
                     for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        pred, _ = crf.viterbi_decode(unary_scores[:length, :], transition_params)
                         correct_labels += np.sum(np.equal(pred, y_true[:length]))
                         total_labels += length
                     acc = 100. * correct_labels / float(total_labels)
@@ -565,7 +565,7 @@ class SimpleLstmCrfModel(object):
                     # Iterate over sequences in a batch
                     for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
                         # Decode the sequence
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        pred, _ = crf.viterbi_decode(unary_scores[:length, :], transition_params)
                         # Count per-timestep hits
                         correct_labels += np.sum(np.equal(pred, y_true[:length]))
                         total_labels += length
@@ -604,7 +604,7 @@ class SimpleLstmCrfModel(object):
                     correct_labels = 0.
                     total_labels = 0.
                     for unary_scores, y_true, length in zip(unary_scores_batch, batch[1], batch_lengths):
-                        pred, _ = crf.viterbi_decode(unary_scores[:length,:], transition_params)
+                        pred, _ = crf.viterbi_decode(unary_scores[:length, :], transition_params)
                         correct_labels += np.sum(np.equal(pred, y_true[:length]))
                         total_labels += length
                     acc = 100. * correct_labels / float(total_labels)

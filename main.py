@@ -6,9 +6,9 @@ import tensorflow as tf
 # from lstm import LstmPipeline
 # from lstmcrf import LstmCrfPipeline
 
-from simple_lstm import SimpleLstmPipeline
-from simple_crf import SimpleCrfPipeline
-from simple_lstmcrf import SimpleLstmcrfPipeline
+from pipeline_lstm import SimpleLstmPipeline
+from pipeline_crf import SimpleCrfPipeline
+from pipeline_lstmcrf import SimpleLstmcrfPipeline
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
@@ -30,7 +30,7 @@ if __name__ == '__main__':
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=32,
+        default=48,
         help=
         'Batch size (default: %(default)s)')
 
@@ -39,7 +39,7 @@ if __name__ == '__main__':
         '--learning-rate',
         type=float,
         dest='learn_rate',
-        default=1e-4,
+        default=1e-2,
         help=
         'Learning rate (default: %(default)s)')
 
@@ -48,7 +48,7 @@ if __name__ == '__main__':
         '--decay-rate',
         type=float,
         dest='decay_rate',
-        default=0.05,
+        default=0.01,
         help=
         'Decay rate for inverse time decay (default: %(default)s)')
 
@@ -96,7 +96,7 @@ if __name__ == '__main__':
         '--hidden-size',
         type=int,
         dest='hidden_size',
-        default=512,
+        default=1024,
         help=
         'Hidden size (default: %(default)s)')
 
@@ -105,7 +105,7 @@ if __name__ == '__main__':
         '--drop-prob',
         type=float,
         dest='drop_prob',
-        default=0.5,
+        default=0.1,
         help=
         'Dropout probability (default: %(default)s)')
     # -----------------------------------------------
