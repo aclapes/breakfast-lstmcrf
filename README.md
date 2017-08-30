@@ -12,14 +12,14 @@ files needed to run the code.
 
 0. Clone this repository (or download it) and navigate where code and Dockerfile are placed.
 
-1. Build the docker image:
+1. Build the docker image. (If already built in your computer, go to step 2)
 ```bash
 docker build -t <your_username>/breakfast:latest .
 ```
 
-2. Run a docker container from the previously built image:
+2. Run a docker container from the previously built image and give it a name "container_name":
 ```bash
-nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ <your_username>/breakfast:latest
+nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ <your_username>/breakfast:latest --name <container_name>
 ```
 The option ```-v``` allows mapping a directory from docker's host into a running docker container.
 
@@ -84,14 +84,14 @@ The ```nvidia-docker run ...``` command above will "start" and "attach" a docker
  is already running one may want to dettach it (so it keeps running in the background) by pressing ```ctrl+p``` ```ctrl+q```.
   To re-attach later:
 ```bash
-docker attach <container_id>
+docker attach <container_name>
 ```
 
 Once finished the execution, one may want to exit the container by typing ```exit``` in the container's bash. 
 This will stop the container. To restart and reattach to the container:
 ```bash
-docker start <container_id>
-docker attach <container_id>
+docker start <container_name>
+docker attach <container_name>
 ```
 
 
