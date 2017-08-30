@@ -68,7 +68,7 @@ optional arguments:
 
 5. Let assume we want to run the LSTMCRF pipeline. This is an example of invocation:
 ```bash
-CUDA_VISIBLE_DEVICES="0" nohup python -u main.py -i dataset/dataset.h5 -M lstmcrf -e 1000 -b 64 -s 1024 -p 0.2 -lr 0.01 -G 0.95
+CUDA_VISIBLE_DEVICES="0" python -u main.py -i dataset/dataset.h5 -M lstmcrf -e 1000 -b 64 -s 1024 -p 0.2 -lr 0.01 -G 0.95
 ```
 This instruction trains, validates, and tests a LSTMCRF model (specified by ```-M```). The ```dataset```, passed via
  ```-i```,  is expected to be a hdf5 type file with a certain format. ```breakfast_from_fv.py``` provides
