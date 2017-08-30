@@ -14,12 +14,12 @@ files needed to run the code.
 
 1. Build the docker image:
 ```bash
-docker build -t aclapes/breakfast:latest .
+docker build -t <your_username>/breakfast:latest .
 ```
 
 2. Run a docker container from the previously built image:
 ```bash
-nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ aclapes/breakfast:latest
+nvidia-docker run -it -v /data/data2/aclapes/Datasets/:/data/datasets/ <your_username>/breakfast:latest
 ```
 The option ```-v``` allows mapping a directory from docker's host into a running docker container.
 
