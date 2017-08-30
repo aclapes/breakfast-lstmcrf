@@ -81,7 +81,7 @@ so you may want to choose one and only particular device, e.g. 0-th.
 ### Notes on docker usage
 
 The ```nvidia-docker run ...``` command above will "start" and "attach" a docker. However, if when the container
- is already running one may want to dettach it (so it keeps running in the background) doing ```ctrl+p``` ```ctrl+q```.
+ is already running one may want to dettach it (so it keeps running in the background) by pressing ```ctrl+p``` ```ctrl+q```.
   To re-attach later:
 ```bash
 docker attach <container_id>
