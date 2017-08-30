@@ -46,9 +46,11 @@ optional arguments:
   -b BATCH_SIZE, --batch-size BATCH_SIZE
                         Batch size (default: 48)
   -lr LEARN_RATE, --learning-rate LEARN_RATE
-                        Learning rate (default: 0.01)
+                        Starting learning rate. It decays after 100 and 1000
+                        epochs by a factor specified by --decay-rate argument
+                        (default: 0.01)
   -dr DECAY_RATE, --decay-rate DECAY_RATE
-                        Decay rate for inverse time decay (default: 0.01)
+                        Decay rate for inverse time decay (default: 10)
   -e NUM_EPOCHS, --num_epochs NUM_EPOCHS
                         Num epochs (default: 2000)
   -ot OPTIMIZER_TYPE, --optimizer-type OPTIMIZER_TYPE

@@ -41,14 +41,14 @@ if __name__ == '__main__':
         dest='learn_rate',
         default=1e-2,
         help=
-        'Learning rate (default: %(default)s)')
+        'Starting learning rate. It decays after 100 and 1000 epochs by a factor specified by --decay-rate argument (default: %(default)s)')
 
     parser.add_argument(
         '-dr',
         '--decay-rate',
         type=float,
         dest='decay_rate',
-        default=0.01,
+        default=10,
         help=
         'Decay rate for inverse time decay (default: %(default)s)')
 
