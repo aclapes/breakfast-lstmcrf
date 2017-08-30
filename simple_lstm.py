@@ -148,7 +148,7 @@ class SimpleLstmModel(object):
         }
         if self.is_training:
             fetches['train_op'] = self.train_op
-            fetches['curr_learn_rate'] = self.curr_learn_rate
+            # fetches['curr_learn_rate'] = self.curr_learn_rate
             # fetches['grads'] = self.grads
 
         progbar = ProgressBar(max_value=num_batches)
@@ -244,7 +244,7 @@ class SimpleLstmPipeline(object):
                         train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
                     )
                 )
-                if e in [1, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
+                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
                     _, te_acc = self.te_model.run_epoch(session)
                     print('TE (acc): %.2f%%' % (te_acc))
 
