@@ -2,10 +2,6 @@ import h5py
 import argparse
 import tensorflow as tf
 
-# from crf import CrfPipeline
-# from lstm import LstmPipeline
-# from lstmcrf import LstmCrfPipeline
-
 from pipeline_lstm import SimpleLstmPipeline
 from pipeline_crf import SimpleCrfPipeline
 from pipeline_lstmcrf import SimpleLstmcrfPipeline
@@ -21,7 +17,7 @@ if __name__ == '__main__':
         '--input-file',
         type=str,
         dest='input_file',
-        default='/data/datasets/breakfast/fv/s1/dataset.8-20.h5',
+        default='/breakfast/breakfast.h5',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -121,7 +117,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print args
 
-    # Read dataset from hdf5 file
+    # Read breakfast from hdf5 file
     f_dataset = h5py.File(args.input_file, 'r')
     print('Dataset (%s) attributes:' % (args.input_file))
     for key in f_dataset.attrs.keys():
@@ -131,10 +127,10 @@ if __name__ == '__main__':
     if args.model_type == 'lstmcrf':
         m = SimpleLstmcrfPipeline(
             f_dataset['training'],
-            f_dataset['validation'],
+            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
-            f_dataset['class_weights'][:],
+            f_dataset['training']['class_weights'][:],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,
@@ -147,10 +143,10 @@ if __name__ == '__main__':
     elif args.model_type == 'lstm':
         m = SimpleLstmPipeline(
             f_dataset['training'],
-            f_dataset['validation'],
+            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
-            f_dataset['class_weights'][:],
+            f_dataset['training']['class_weights'][:],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,
@@ -163,7 +159,7 @@ if __name__ == '__main__':
     elif args.model_type == 'crf':
         m = SimpleCrfPipeline(
             f_dataset['training'],
-            f_dataset['validation'],
+            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
             batch_size=args.batch_size,

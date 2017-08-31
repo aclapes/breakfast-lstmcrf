@@ -1,0 +1,17 @@
+0:none
+1:AnswerPhone
+2:DriverCar
+3:Eat
+4:FightPerson
+5:GetOutCar
+6:GrabHand
+7:HandShake
+8:HugPerson
+9:Kiss
+10:OpenCarDoor
+11:OpenDoor
+12:Run
+13:SitDown
+14:SitUp
+15:StandUp
+16:ThreatenPerson

@@ -95,6 +95,6 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
 
 
 if __name__ == "__main__":
-    create_json_and_labels('/data/vid/PALL/', '/data/segmentation_coarse/', 'dataset/labels.txt', 'dataset/videos.json')
+    create_json_and_labels('/data/vid/PALL/', '/data/segmentation_coarse/', 'breakfast/labels.txt', 'breakfast/videos.json')
 
     quit()

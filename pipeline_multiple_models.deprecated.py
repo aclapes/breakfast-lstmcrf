@@ -828,14 +828,14 @@ class SimpleLstmModel(object):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Create breakfast hdf5 dataset from feature files.')
+    parser = argparse.ArgumentParser(description='Create breakfast hdf5 breakfast from feature files.')
 
     parser.add_argument(
         '-i',
         '--input-file',
         type=str,
         dest='input_file',
-        default='/datasets/breakfast/fv/s1/dataset.h5',
+        default='/datasets/breakfast/fv/s1/breakfast.h5',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 

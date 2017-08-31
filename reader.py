@@ -2,7 +2,7 @@ import numpy as np
 
 def read_data_generator(data, labels, lengths, batch_size=16):
     '''
-    This generator function serves a batch of the dataset at each call.
+    This generator function serves a batch of the breakfast at each call.
     See what a generator function is ;)
     :param data:
     :param labels:
@@ -24,7 +24,7 @@ def read_data_generator(data, labels, lengths, batch_size=16):
 
 # def read_data_generator(data, labels, lengths, batch_size=16):
 #     '''
-#     This generator function serves a batch of the dataset at each call.
+#     This generator function serves a batch of the breakfast at each call.
 #     See what a generator function is ;)
 #     :param data:
 #     :param labels:

@@ -18,6 +18,22 @@ def import_labels(f):
         i += 1
     return labels
 
+def read_features(filepath, pool_op, length=8):
+    import csv
+    with open(filepath, 'r') as csvfile:
+        reader = csv.reader(csvfile, delimiter='\t')
+        X = np.array([l for l in reader], dtype=np.float32)[:,1:]
+    X = X[:(X.shape[0]//length)*length,:]
+
+    if pool_op == 'avg':  # average pooling
+        X = np.mean(X.reshape(X.shape[0]//length, length, X.shape[1]), axis=1)
+    elif pool_op == 'max':  # max pooling
+        X_r = X.reshape(X.shape[0]//length, length, X.shape[1])
+        X_min, X_max = X_r.min(axis=1)
+        X = np.where(-X_min > X_max, X_min, X_max)
+
+    return X
+
 def generate_output(video_info, labels, length=16):
     ''' Given the info of the vide, generate a vector of classes corresponding
     the output for each clip of the video which features have been extracted.
@@ -25,7 +41,7 @@ def generate_output(video_info, labels, length=16):
     nb_frames = video_info['num_frames']
     last_first_name = nb_frames - length + 1
 
-    start_frames = range(0, last_first_name, length // 2)
+    start_frames = range(0, last_first_name, length)
 
     # Check the output for each frame of the video
     outputs = ['none'] * nb_frames
@@ -50,26 +66,29 @@ def generate_output(video_info, labels, length=16):
 
     return instances
 
-def create(features_path, stride, info_file, labels_file, output_dir):
+def create(features_path, pool_op, pool_size, stride, info_file, labels_file, output_file):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
-        videos_data = {
-            key.replace(u'cereals', 'cereal').replace(u'salat', 'salad'): val for key, val in videos_data.iteritems()
-        }
+        # uncomment if want to merge validation and testing
+        # ---
+        # for key, value in videos_data.iteritems():
+        #     if videos_data[key]['subset'] == 'validation':
+        #         videos_data[key]['subset'] = 'training'
+        # ---
+
     with open(labels_file, 'r') as f:
         labels = import_labels(f)
 
-    features_file = os.path.join(features_path, 'video_features.hdf5')
-    f_video_features = h5py.File(features_file, 'r')
-
     dataset = dict()
-    subsets = ['training', 'validation', 'testing']
+    subsets = ['training', 'testing', 'validation']
+    # subsets = ['training', 'testing']  # substitute for above line to merge validation and testing
+
+    class_counts = np.zeros((len(labels),), dtype=np.float32)
+
     for subset in subsets:
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
         ]
-
-        videos = list(set(videos) & set(f_video_features.keys()))
 
         nb_videos = len(videos)
         print('Number of videos for {} subset: {}'.format(subset, nb_videos))
@@ -79,25 +98,32 @@ def create(features_path, stride, info_file, labels_file, output_dir):
             outputs = {},
             lengths = {}
         )
+
         for i,key in enumerate(videos):
-            print('Reading %d/%d from disk...' % (i,nb_videos))
-            dataset[subset]['video_features'][key] = np.array(f_video_features[key][...], dtype=np.float32)
-            dataset[subset]['outputs'][key] = generate_output(videos_data[key], labels)
+            print('Reading %d/%d from disk...' % (i,nb_videos-1))
+            filepath = os.path.join(features_path + key.split('_')[-1], key + '.txt')
+            x = read_features(filepath, pool_op, length=pool_size)
+            y = generate_output(videos_data[key], labels, length=pool_size)
+
+            if subset == 'training':  # count to assign class weights later
+                ids, counts = np.unique(y, return_counts=True)
+                for id,c in zip(ids,counts): class_counts[id] += c
+
+            dataset[subset]['video_features'][key] = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
+            dataset[subset]['outputs'][key] = y
             dataset[subset]['lengths'][key] = len(dataset[subset]['outputs'][key])
-            assert dataset[subset]['video_features'][key].shape[0] == dataset[subset]['lengths'][key]
+            assert dataset[subset]['video_features'][key].shape[0] == len(dataset[subset]['outputs'][key])
 
     max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
     max_len = ((max_len // stride) + 1) * stride
 
-    output_file = os.path.join(output_dir, 'dataset_stateful.hdf5')
     f_dataset = h5py.File(output_file, 'w')
+
     for subset in subsets:
         print('Creating HDF file for %s...' % (subset))
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
         ]
-        videos = list(set(videos) & set(f_video_features.keys()))
-
 
         num_features = dataset[subset]['video_features'][videos[0]].shape[1]
 
@@ -129,36 +155,42 @@ def create(features_path, stride, info_file, labels_file, output_dir):
             chunks=(16,1),
             dtype='int32')
 
+        f_dataset_subset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
+
     # Save some additional attributes
     f_dataset.attrs['no_classes'] = len(labels)
+    f_dataset.attrs['pool_op'] = pool_op
+    f_dataset.attrs['pool_size'] = pool_size
     f_dataset.attrs['stride'] = stride
+    # f_dataset.attrs['class_weights'] = (np.max(class_counts)/class_counts)
 
     f_dataset.close()
 
     # Sanity check
     f_dataset = h5py.File(output_file, 'r')
-    f_dataset.attrs['no_classes'] == len(labels)
+    # f_dataset.attrs['class_weights']
+    assert f_dataset.attrs['no_classes'] == len(labels)
     f_dataset.close()
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Create breakfast hdf5 dataset from feature files.')
+    parser = argparse.ArgumentParser(description='Create breakfast hdf5 breakfast from feature files.')
 
     parser.add_argument(
-        '-f',
-        '--features-file',
+        '-d',
+        '--features-dir',
         type=str,
-        dest='features_file',
-        default='/datasets/breakfast/3dconv_feats/video_features.h5',
+        dest='features_dir',
+        default='/datasets/breakfast/fv/s1/',
         help=
-        'File in which features are stored (default: %(default)s)')
+        'Directory where features are stored (default: %(default)s)')
 
     parser.add_argument(
         '-i',
         '--videos-info',
         type=str,
         dest='videos_info',
-        default='dataset/videos.json',
+        default='breakfast/videos.json',
         help=
         'File (json) where info of the videos is stored (default: %(default)s)')
 
@@ -167,9 +199,27 @@ if __name__ == '__main__':
         '--labels',
         type=str,
         dest='labels',
-        default='dataset/labels.txt',
+        default='breakfast/labels.txt',
         help=
         'File (txt) where labels are listed (default: %(default)s)')
+
+    parser.add_argument(
+        '-po',
+        '--pool-op',
+        type=str,
+        dest='pool_op',
+        default='avg',
+        help=
+        'Pooling operation (avg or max) (default: %(default)s)')
+
+    parser.add_argument(
+        '-ps',
+        '--pool-size',
+        type=int,
+        dest='pool_size',
+        default=5,
+        help=
+        'Pooling stride (default: %(default)s)')
 
     parser.add_argument(
         '-s',
@@ -185,13 +235,16 @@ if __name__ == '__main__':
         '--output-file',
         type=str,
         dest='output_file',
-        default='/datasets/breakfast/3dconv_feats/dataset.h5',
+        default='breakfast/breakfast.h5',
         help=
         'Directory where hd5 file will be generated (default: %(default)s)')
 
     args = parser.parse_args()
+    print args
 
-    create(args.features_file,
+    create(args.features_dir,
+           args.pool_op,
+           args.pool_size,
            args.stride,
            args.videos_info,
            args.labels,
