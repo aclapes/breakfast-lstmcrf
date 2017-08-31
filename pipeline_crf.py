@@ -41,7 +41,8 @@ class SimpleCrfModel(object):
         hidden_w = tf.get_variable('hidden_w', [num_features, config['hidden_size']], dtype=tf.float32)
         hidden_b = tf.get_variable('hidden_b', [config['hidden_size']], dtype=tf.float32, initializer=tf.zeros_initializer())
         hidden_activations = tf.matmul(matricied_x, hidden_w) + hidden_b
-        hidden_activations = tf.layers.dropout(hidden_activations, rate=config['drop_prob'], training=config['drop_prob'])
+        if is_training:
+            hidden_activations = tf.nn.dropout(hidden_activations, keep_prob=(1-config['drop_prob']))
 
         softmax_w = tf.get_variable('softmax_w', [config['hidden_size'], no_classes], dtype=tf.float32)
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.zeros_initializer())

@@ -235,7 +235,7 @@ if __name__ == '__main__':
         '--output-file',
         type=str,
         dest='output_file',
-        default='breakfast/breakfast.h5',
+        default='breakfast/dataset.h5',
         help=
         'Directory where hd5 file will be generated (default: %(default)s)')
 
