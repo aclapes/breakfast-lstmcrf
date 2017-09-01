@@ -27,8 +27,6 @@ class SimpleLstmModel(object):
         clip_norm = config['clip_norm']
 
         self.class_weights = config['class_weights']
-        self.sorting = np.argsort(self.class_weights)  # using class weight criterion
-
 
         # Graph construction
 
@@ -221,6 +219,8 @@ class SimpleLstmPipeline(object):
             learn_rate = learn_rate,
             decay_rate = decay_rate
         )
+
+        self.sorting = np.argsort(class_weights)  # using class weight criterion
 
         test_config = config.copy()
         test_config['batch_size'] = 1

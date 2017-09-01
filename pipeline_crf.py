@@ -25,7 +25,6 @@ class SimpleCrfModel(object):
         clip_norm = config['clip_norm']
 
         self.class_weights = config['class_weights']
-        self.sorting = np.argsort(self.class_weights)  # using class weight criterion
 
         # Graph construction
 
@@ -179,6 +178,8 @@ class SimpleCrfPipeline(object):
             clip_norm = clip_norm,
             class_weights = class_weights
         )
+
+        self.sorting = np.argsort(class_weights)  # using class weight criterion
 
         test_config = config.copy()
         test_config['batch_size'] = 1
