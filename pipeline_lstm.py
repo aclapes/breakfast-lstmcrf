@@ -247,34 +247,47 @@ class SimpleLstmPipeline(object):
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
-            train_evals = [None] * self.num_epochs
-            val_evals = [None] * self.num_epochs
+            train_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
+            val_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
 
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
 
-                train_evals[e], train_class_evals = self.train_model.run_epoch(session)
-                print train_class_evals[self.sorting]
+                # Train step
+                (loss_train, mof_train), train_class_evals = self.train_model.run_epoch(session)
+                moc_train = np.nanmean(train_class_evals)
 
-                val_evals[e], val_class_evals = self.val_model.run_epoch(session)
-                print val_class_evals[self.sorting]
+                # Validation step
+                (loss_val, mof_val), val_class_evals = self.val_model.run_epoch(session)
+                moc_val = np.nanmean(val_class_evals)
 
+                # Print summary
                 print(
-                    'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
-                        train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
+                    'TRAIN (loss/mof/moc): %.4f/%.2f%%/%.2f%%, VAL (loss/mof/moc): %.4f/%.2f%%/%.2f%%' % (
+                        loss_train, mof_train, moc_train, loss_val, mof_val, moc_val
                     )
                 )
 
-                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
-                    (_, te_acc), te_class_evals = self.te_model.run_epoch(session)
+                # Print per-class accuracies
+                print train_class_evals[self.sorting]
+                print val_class_evals[self.sorting]
+
+                # Keep track of loss/mof/moc across epochs
+                train_evals[e,:] = [loss_train, mof_train, moc_train]
+                val_evals[e,:] = [loss_val, mof_val, moc_val]
+
+                # Train step (every few epochs). To see progress (not choosing based on this!)
+                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:
+                    (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
+                    moc_te = np.nanmean(te_class_evals)
                     print te_class_evals[self.sorting]
-                    print('TE (acc): %.2f%%' % (te_acc))
+                    print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
 
-            tr_acc = np.mean([acc for _,acc in train_evals])
-            val_acc = np.mean([acc for _,acc in val_evals])
-
-            _, te_acc = self.te_model.run_epoch(session)
+            (_, mof_te), te_class_evals = self.te_model.run_epoch(session)
+            moc_te = np.nanmean(te_class_evals)
             print(
-                'TRAIN (acc): %.2f%%, VAL (acc): %.2f%%, TE (acc): %.2f%%' % (
-                    tr_acc, val_acc, te_acc)
+                'TRAIN (mof/moc): %.2f%%/%.2f%%, VAL (mof/moc): %.2f%%/%.2f%%, TE (mof/moc): %.2f%%/%.2f%%' % (
+                    np.nanmean(train_evals[:,1]), np.nanmean(train_evals[:,2]),
+                    np.nanmean(val_evals[:,1]), np.nanmean(val_evals[:,2]),
+                    mof_te, moc_te)
             )
