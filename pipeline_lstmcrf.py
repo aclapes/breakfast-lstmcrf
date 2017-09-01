@@ -28,6 +28,7 @@ class SimpleLstmcrfModel(object):
         clip_norm = config['clip_norm']
 
         self.class_weights = config['class_weights']
+        self.sorting = np.argsort(self.class_weights)  # using class weight criterion
 
         # Graph construction
 
@@ -234,10 +235,10 @@ class SimpleLstmcrfPipeline(object):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
 
                 train_evals[e], train_class_evals = self.train_model.run_epoch(session)
-                print train_class_evals
+                print train_class_evals[self.sorting]
 
                 val_evals[e], val_class_evals = self.val_model.run_epoch(session)
-                print val_class_evals
+                print val_class_evals[self.sorting]
 
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
@@ -247,7 +248,7 @@ class SimpleLstmcrfPipeline(object):
 
                 if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
                     (_, te_acc), te_class_evals = self.te_model.run_epoch(session)
-                    print te_class_evals
+                    print te_class_evals[self.sorting]
                     print('TE (acc): %.2f%%' % (te_acc))
 
             tr_acc = np.mean([acc for _,acc in train_evals])
