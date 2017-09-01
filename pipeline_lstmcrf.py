@@ -7,7 +7,7 @@ from tensorflow.contrib import rnn
 import src.crf as crf  # master's version of tf.contrib.crf
 
 from reader import read_data_generator
-from evaluation import compute_framewise_accuracy
+from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
 
 
 class SimpleLstmcrfModel(object):
@@ -26,6 +26,8 @@ class SimpleLstmcrfModel(object):
         hidden_size = config['hidden_size']
         drop_prob = config['drop_prob']
         clip_norm = config['clip_norm']
+
+        self.class_weights = config['class_weights']
 
         # Graph construction
 
@@ -134,6 +136,9 @@ class SimpleLstmcrfModel(object):
             # fetches['curr_learn_rate'] = self.curr_learn_rate
             # fetches['grads'] = self.grads
 
+        hit_classes = np.zeros((len(self.class_weights),), dtype=np.float32)
+        true_classes = np.zeros((len(self.class_weights),), dtype=np.float32)
+
         progbar = ProgressBar(max_value=num_batches)
         for b in range(num_batches):
             batch = self.reader.next()
@@ -153,10 +158,16 @@ class SimpleLstmcrfModel(object):
 
             batch_loss[b] = vals['loss']
             batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
+            hits, trues = compute_classwise_accuracy(vals['predictions'], batch[1], batch[2], self.class_weights)
+            hit_classes += hits
+            true_classes += trues
+            # if num_batches < num_instances:
+            #     print 100.* (hits/trues)
+
             progbar.update(b)
         progbar.finish()
 
-        return np.mean(batch_loss), np.mean(batch_accs)
+        return (np.mean(batch_loss), np.mean(batch_accs)), 100 * (hit_classes / true_classes)
 
 
 class SimpleLstmcrfPipeline(object):
@@ -212,6 +223,7 @@ class SimpleLstmcrfPipeline(object):
 
 
     def run(self, gpu_options):
+        np.set_printoptions(precision=2,linewidth=150)
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
 
@@ -220,15 +232,22 @@ class SimpleLstmcrfPipeline(object):
 
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
-                train_evals[e] = self.train_model.run_epoch(session)
-                val_evals[e] = self.val_model.run_epoch(session)
+
+                train_evals[e], train_class_evals = self.train_model.run_epoch(session)
+                print train_class_evals
+
+                val_evals[e], val_class_evals = self.val_model.run_epoch(session)
+                print val_class_evals
+
                 print(
                     'TRAIN (loss/acc): %.4f/%.2f%%, VAL (loss/acc): %.4f/%.2f%%' % (
                         train_evals[e][0], train_evals[e][1], val_evals[e][0], val_evals[e][1]
                     )
                 )
+
                 if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:  # see progress (not choosing based on this!)
-                    _, te_acc = self.te_model.run_epoch(session)
+                    (_, te_acc), te_class_evals = self.te_model.run_epoch(session)
+                    print te_class_evals
                     print('TE (acc): %.2f%%' % (te_acc))
 
             tr_acc = np.mean([acc for _,acc in train_evals])

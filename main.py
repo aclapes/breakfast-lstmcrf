@@ -162,6 +162,7 @@ if __name__ == '__main__':
             f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
             f_dataset['testing'],
             f_dataset.attrs['no_classes'],
+            f_dataset['training']['class_weights'][:],
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,

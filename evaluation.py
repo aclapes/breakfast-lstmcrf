@@ -19,21 +19,24 @@ def compute_framewise_accuracy(predictions, labels, lengths):
     return 100. * correct_labels / float(total_labels)
 
 
-# def compute_framewise_accuracy(predictions, labels, weights):
-#     '''
-#     Computes the framewise accuracy over a set of predictions.
-#
-#     :param predictions: 2-D array of predictions [num_batches, num_timesteps]
-#     :param labels: 2-D array of labels [num_batches, num_timesteps]
-#     :param weights: 2-D array of weights [num_batches, num_timesteps]. Used to mask padded timesteps.
-#     :return:
-#     '''
-#
-#     correct_labels = total_labels = 0.
-#
-#     for pred, y, w in zip(predictions, labels, weights):
-#         length = int(np.sum(w))
-#         correct_labels += np.sum(np.equal(pred[:length], y[:length]))
-#         total_labels += length
-#
-#     return 100. * correct_labels / float(total_labels)
+def compute_classwise_accuracy(predictions, labels, lengths, class_weights):
+    '''
+    Computes the framewise accuracy over a set of predictions.
+
+    :param predictions: 2-D array of predictions [num_batches, num_timesteps]
+    :param labels: 2-D array of labels [num_batches, num_timesteps]
+    :param lengths: 1-D array of lengths [num_batches]. Used to trim padded timesteps.
+    :return:
+    '''
+
+    hit_classes = np.zeros((len(class_weights),), dtype=np.float32)
+    true_classes = np.zeros((len(class_weights),), dtype=np.float32)
+
+    for pred, y, l in zip(predictions, labels, lengths):
+        for c in range(len(class_weights)):
+            hits = np.sum((pred[:l] == c) & (y[:l] == c))
+            trues = np.sum(y[:l] == c)
+            hit_classes[c] += hits
+            true_classes[c] += trues
+
+    return hit_classes, true_classes
