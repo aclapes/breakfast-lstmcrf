@@ -4,6 +4,13 @@ import h5py
 import argparse
 import imageio
 from scipy.misc import imresize
+from os.path import join
+from os import makedirs
+import time
+
+MAX_LEN = 10000
+HEIGHT = 224
+WIDTH = 224
 
 def import_labels(f):
     ''' Read from a file all the labels from it '''
@@ -52,7 +59,7 @@ def generate_output(video_info, labels, length=16):
     return instances
 
 
-def vid_to_array(filepath, size_xy=None):
+def vid_to_array(filepath, frame_size=None):
     arr = None
 
     # init video capture
@@ -64,16 +71,16 @@ def vid_to_array(filepath, size_xy=None):
             im = cap.get_next_data()  # obtain the frame
 
             # determine final image size size
-            if size_xy is None:
+            if frame_size is None:
                 height, width, _ = im.shape
             else:
-                height, width = size_xy[0], size_xy[1]
+                height, width = frame_size[0], frame_size[1]
 
             # now that we know frame dimensions, init arr to store the frames
             if arr is None:
                 arr = np.empty((num_frames, height, width, im.shape[-1]), dtype=np.uint8)
 
-            arr[i] = im if (size_xy is None) else imresize(im, size=(height,width), interp='bilinear')
+            arr[i] = im if (frame_size is None) else imresize(im, size=(height,width), interp='bilinear')
         except:
             arr[i] = np.zeros((height,width,im.shape[-1]), dtype=np.uint8)
     cap.close()
@@ -81,7 +88,7 @@ def vid_to_array(filepath, size_xy=None):
     return arr
 
 
-def create(features_path, stride, info_file, labels_file, output_file):
+def create(features_path, info_file, labels_file, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         # uncomment if want to merge validation and testing
@@ -94,11 +101,12 @@ def create(features_path, stride, info_file, labels_file, output_file):
     with open(labels_file, 'r') as f:
         labels = import_labels(f)
 
-    dataset = dict()
-    subsets = ['training', 'testing', 'validation']
-    # subsets = ['training', 'testing']  # substitute for above line to merge validation and testing
+    try:
+        makedirs(output_dir)
+    except:
+        pass
 
-    class_counts = np.zeros((len(labels),), dtype=np.float32)
+    subsets = ['training', 'testing', 'validation']
 
     for subset in subsets:
         videos = [
@@ -108,82 +116,45 @@ def create(features_path, stride, info_file, labels_file, output_file):
         nb_videos = len(videos)
         print('Number of videos for {} subset: {}'.format(subset, nb_videos))
 
-        dataset[subset] = dict(
-            video_frames = {},
-            outputs = {},
-            lengths = {}
-        )
+        output_file = join(output_dir, subset + '.h5')
+        f_dataset = h5py.File(output_file, 'w')
+
+        f_dataset.create_dataset('video_features',(len(videos),MAX_LEN,HEIGHT*WIDTH*3), fillvalue=0,
+                            dtype=np.uint8, chunks=(1,100,HEIGHT*WIDTH*3), compression='gzip', compression_opts=9)
+        f_dataset.create_dataset('outputs',(len(videos),MAX_LEN), fillvalue=255,
+                            dtype=np.uint8, chunks=(1,100), compression='gzip', compression_opts=9)
+        f_dataset.create_dataset('lengths',(len(videos),1), fillvalue=0,
+                            dtype=np.uint8)
+
+        class_counts = np.zeros((len(labels),), dtype=np.float32)
+        perm = np.random.RandomState(42).permutation(len(videos))
 
         for i,key in enumerate(videos):
             print('Reading %d/%d from disk...' % (i,nb_videos-1))
-            x = vid_to_array(videos_data[key]['url'], size_xy=(224,224))
+            x = vid_to_array(videos_data[key]['url'], frame_size=(HEIGHT,WIDTH))
             y = generate_output(videos_data[key], labels, length=1)
+
+            st_time = time.time()
+            f_dataset['video_features'][perm[i],:x.shape[0],:] = x.reshape([-1,HEIGHT*WIDTH*3])
+            print time.time() - st_time
+            f_dataset['outputs'][perm[i],:len(y)] = y
+            f_dataset['lengths'][perm[i],0] = len(y)
 
             if subset == 'training':  # count to assign class weights later
                 ids, counts = np.unique(y, return_counts=True)
                 for id,c in zip(ids,counts): class_counts[id] += c
 
-            # dataset[subset]['video_features'][key] = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
-            dataset[subset]['video_frames'][key] = x
-            dataset[subset]['outputs'][key] = y
-            dataset[subset]['lengths'][key] = len(dataset[subset]['outputs'][key])
-            print(len(dataset[subset]['outputs'][key]))
-            assert dataset[subset]['video_frames'][key].shape[0] == len(dataset[subset]['outputs'][key])
+        f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
 
-    max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
-    max_len = ((max_len // stride) + 1) * stride
+        # Save some additional attributes
+        f_dataset.attrs['no_classes'] = len(labels)
 
-    f_dataset = h5py.File(output_file, 'w')
+        f_dataset.close()
 
-    for subset in subsets:
-        print('Creating HDF file for %s...' % (subset))
-        videos = [
-            key for key in videos_data.keys() if videos_data[key]['subset'] == subset
-        ]
-
-        num_features = dataset[subset]['video_features'][videos[0]].shape[1]
-
-        video_features = np.zeros((len(videos), max_len, num_features), dtype=np.float32)
-        outputs = np.zeros((len(videos), max_len), dtype=np.float32)
-        lengths = np.zeros((len(videos), 1), dtype=np.int32)
-        for i, key in enumerate(videos):
-            leng = dataset[subset]['lengths'][key]
-            video_features[i,:leng,:] = dataset[subset]['video_features'][key]
-            outputs[i,:leng] = dataset[subset]['outputs'][key]
-            lengths[i,0] = leng
-
-        perm = np.random.RandomState(42).permutation(len(videos))
-        f_dataset_subset = f_dataset.create_group(subset)
-        f_dataset_subset.create_dataset(
-            'video_features',
-            data=video_features[perm,:,:],
-            chunks=(16, video_features.shape[1], video_features.shape[2]),
-            dtype='float32')
-        f_dataset_subset.create_dataset(
-            'outputs',
-            data=outputs[perm,:],
-            chunks=(16, outputs.shape[1]),
-            dtype='float32')
-        f_dataset_subset.create_dataset(
-            'lengths',
-            data=lengths[perm],
-            chunks=(16,1),
-            dtype='int32')
-
-        f_dataset_subset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
-
-    # Save some additional attributes
-    f_dataset.attrs['no_classes'] = len(labels)
-    f_dataset.attrs['stride'] = stride
-    # f_dataset.attrs['class_weights'] = (np.max(class_counts)/class_counts)
-
-    f_dataset.close()
-
-    # Sanity check
-    f_dataset = h5py.File(output_file, 'r')
-    # f_dataset.attrs['class_weights']
-    assert f_dataset.attrs['no_classes'] == len(labels)
-    f_dataset.close()
+        # Sanity check
+        f_dataset = h5py.File(output_file, 'r')
+        assert f_dataset.attrs['no_classes'] == len(labels)
+        f_dataset.close()
 
 
 if __name__ == '__main__':
@@ -217,28 +188,18 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
-        '-s',
-        '--stride',
-        type=int,
-        dest='stride',
-        default=20,
-        help=
-        'Pad the end of the sequence, so no. steps is multiple of s (default: %(default)s)')
-
-    parser.add_argument(
         '-o',
-        '--output-file',
+        '--output-dir',
         type=str,
-        dest='output_file',
-        default='breakfast/dataset.h5',
+        dest='output_dir',
+        default='breakfast/dataset/',
         help=
-        'Directory where hd5 file will be generated (default: %(default)s)')
+        'Directory where hd5 files will be generated for train/val/test (default: %(default)s)')
 
     args = parser.parse_args()
     print args
 
     create(args.features_dir,
-           args.stride,
            args.videos_info,
            args.labels,
-           args.output_file)
+           args.output_dir)

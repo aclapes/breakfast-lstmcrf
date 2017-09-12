@@ -23,12 +23,16 @@ os.remove(path)
 st_time = time.time()
 print 'started'
 with h5py.File(path, "a", libver='latest') as f:
-    dset = f.create_dataset('voltage284', (10,10000,FEA_DIM), fillvalue=0, maxshape=(None,None,FEA_DIM),
-                            dtype='i8', chunks=(5,100,FEA_DIM), compression='gzip', compression_opts=9)
+    # dt = h5py.special_dtype(vlen=np.dtype('uint8'))
+
+    st2_time = time.time()
+    dset = f.create_dataset('voltage284', (1000,10000,FEA_DIM), fillvalue=0, maxshape=(None,None,FEA_DIM),
+                            dtype=np.uint8, chunks=(32,100,FEA_DIM), compression='gzip', compression_opts=1)
+    print time.time() - st2_time
     for i in range(len(data.L)):
-        dset.resize((dset.shape[0] + 5 if i >= dset.shape[0] else dset.shape[0],
-                     data.vectors[i].shape[0] if dset.shape[1] < data.vectors[i].shape[0] else dset.shape[1],
-                     FEA_DIM))
+        # dset.resize((dset.shape[0] + 5 if i >= dset.shape[0] else dset.shape[0],
+        #              data.vectors[i].shape[0] if dset.shape[1] < data.vectors[i].shape[0] else dset.shape[1],
+        #              FEA_DIM))
         dset[i, :data.vectors[i].shape[0], :] = data.vectors[i]
         # dset[-1] = np.random.random(10**4)
 print time.time() - st_time
