@@ -3,6 +3,7 @@ import os
 import re
 import numpy as np
 import imageio
+import argparse
 
 
 def create_json_and_labels(path_videos, path_segmentation, output_labels_file, output_json_file):
@@ -97,6 +98,50 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
 
 
 if __name__ == "__main__":
-    create_json_and_labels('/datasets/breakfast/vid/', '/datasets/breakfast/segmentation_coarse/', 'breakfast/labels.txt', 'breakfast/videos.json')
+    parser = argparse.ArgumentParser(description='Create couple of files required to create the dataset.')
+
+    parser.add_argument(
+        '-v',
+        '--videos-dir',
+        type=str,
+        dest='videos_dir',
+        default='/datasets/breakfast/vid/',
+        help=
+        'Directory containing the breakfast data (default: %(default)s)')
+
+    parser.add_argument(
+        '-s',
+        '--segmentations-dir',
+        type=str,
+        dest='segmentations_dir',
+        default='/datasets/breakfast/segmentation_coarse/',
+        help=
+        'Directory containing the breakfast segmentation files (default: %(default)s)')
+
+    parser.add_argument(
+        '-l',
+        '--labels-file',
+        type=str,
+        dest='labels_file',
+        default='breakfast/labels.txt',
+        help=
+        'Output labels file (default: %(default)s)')
+
+    parser.add_argument(
+        '-i',
+        '--info-file',
+        type=str,
+        dest='info_file',
+        default='breakfast/videos.json',
+        help=
+        'Output info file (default: %(default)s)')
+
+    args = parser.parse_args()
+    print(args)
+
+    create_json_and_labels(args.videos_dir,
+                           args.segmentations_dir,
+                           args.labels_file,
+                           args.info_file)
 
     quit()

@@ -88,7 +88,7 @@ def vid_to_array(filepath, frame_size=None):
     return arr
 
 
-def create(features_path, info_file, labels_file, output_dir):
+def create(info_file, labels_file, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         # uncomment if want to merge validation and testing
@@ -161,15 +161,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Create breakfast hdf5 breakfast from feature files.')
 
     parser.add_argument(
-        '-d',
-        '--features-dir',
-        type=str,
-        dest='features_dir',
-        default='/datasets/breakfast/fv/s1/',
-        help=
-        'Directory where features are stored (default: %(default)s)')
-
-    parser.add_argument(
         '-i',
         '--videos-info',
         type=str,
@@ -199,7 +190,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print args
 
-    create(args.features_dir,
-           args.videos_info,
+    create(args.videos_info,
            args.labels,
            args.output_dir)
