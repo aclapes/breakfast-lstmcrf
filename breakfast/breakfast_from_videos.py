@@ -130,19 +130,21 @@ def create(info_file, labels_file, output_dir):
         perm = np.random.RandomState(42).permutation(len(videos))
 
         for i,key in enumerate(videos):
-            print('Reading %d/%d from disk...' % (i,nb_videos-1))
+            print('Reading %d/%d video and writing HDF5 file...' % (i,nb_videos-1))
+            st_time = time.time()
+
             x = vid_to_array(videos_data[key]['url'], frame_size=(HEIGHT,WIDTH))
             y = generate_output(videos_data[key], labels, length=1)
 
-            st_time = time.time()
             f_dataset['video_features'][perm[i],:x.shape[0],:] = x.reshape([-1,HEIGHT*WIDTH*3])
-            print time.time() - st_time
             f_dataset['outputs'][perm[i],:len(y)] = y
             f_dataset['lengths'][perm[i],0] = len(y)
 
             if subset == 'training':  # count to assign class weights later
                 ids, counts = np.unique(y, return_counts=True)
                 for id,c in zip(ids,counts): class_counts[id] += c
+
+            print('Took %d secs.' % (time.time() - st_time))
 
         f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
 
@@ -185,7 +187,7 @@ if __name__ == '__main__':
         dest='output_dir',
         default='breakfast/dataset/',
         help=
-        'Directory where hd5 files will be generated for train/val/test (default: %(default)s)')
+        'Directory where 3 hd5 files will be generated (training / validation / testing) (default: %(default)s)')
 
     args = parser.parse_args()
     print args
