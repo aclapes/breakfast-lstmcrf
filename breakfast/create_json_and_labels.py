@@ -34,8 +34,10 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                 video_filename = os.path.splitext(segm_file)[0]
 
                 # find corresponding video file path
+                split = video_filename.split('_')
+                url_stem = os.path.join(split[0],split[1],split[2]+'_'+split[3])
                 for fmt in ['avi', 'mp4', 'mov', 'mpeg', 'mkv']:
-                    url = os.path.join(path_videos, video_filename + '.' + fmt)
+                    url = os.path.join(path_videos, url_stem + '.' + fmt)
                     url = url.replace('salat', 'salad')
                     url = url.replace('cereals', 'cereal')
                     if os.path.exists(url):
@@ -95,6 +97,6 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
 
 
 if __name__ == "__main__":
-    create_json_and_labels('/data/vid/PALL/', '/data/segmentation_coarse/', 'breakfast/labels.txt', 'breakfast/videos.json')
+    create_json_and_labels('/datasets/breakfast/vid/', '/datasets/breakfast/segmentation_coarse/', 'breakfast/labels.txt', 'breakfast/videos.json')
 
     quit()

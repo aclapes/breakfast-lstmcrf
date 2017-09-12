@@ -73,7 +73,7 @@ class SimpleLstmcrfModel(object):
         rnn_outputs = tf.concat(rnn_outputs, axis=2)
 
         matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
-        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32)
+        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
@@ -85,7 +85,9 @@ class SimpleLstmcrfModel(object):
             unary_scores, self.y_batch, self.l_batch)
 
         # compute loss and framewise predictions
-        self.loss = tf.reduce_mean(-log_likelihood)
+        reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.loss = tf.reduce_mean(-log_likelihood) + tf.add_n(reg_losses)
+
         self.predictions, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
 
         if not is_training:
@@ -209,7 +211,7 @@ class SimpleLstmcrfPipeline(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            initializer = tf.random_uniform_initializer(-0.1, 0.1)
+            initializer = tf.random_uniform_initializer(-0.01, 0.01)
 
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):

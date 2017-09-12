@@ -8,8 +8,9 @@ from tensorflow.contrib import rnn
 from reader import read_data_generator
 from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
 
+from src.dropout import variational_dropout
 
-class SimpleLstmModel(object):
+class LstmModel(object):
     def __init__(self, config, input_data, is_training):
         self.config = config
         self.input_data = input_data
@@ -37,39 +38,61 @@ class SimpleLstmModel(object):
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
 
-        x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+        self.x = tf.nn.l2_normalize(self.x_batch, dim=2)
         if is_training:
-            x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+            self.x = tf.nn.dropout(self.x, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        self.cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        self.cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
+        # if is_training:
+        #     cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
+        #                                             output_keep_prob=1-drop_prob,
+        #                                             variational_recurrent=True,
+        #                                             dtype=tf.float32)
+        #     cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw,
+        #                                             output_keep_prob=1-drop_prob,
+        #                                             variational_recurrent=True,
+        #                                             dtype=tf.float32)
+
+        self.initial_state_fw = self.cell_fw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
+        self.initial_state_bw = self.cell_bw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
+        states = (self.initial_state_fw, self.initial_state_bw)
+
+        self.chunk_size = 20
+        num_splits = self.x.get_shape()[1]//self.chunk_size
+
+        self.x_stack = tf.split(self.x, num_or_size_splits=num_splits, axis=1)  # split along temporal dimension
+        self.outputs_stack = tf.TensorArray(dtype=tf.float32, size=(self.x.get_shape()[1]//self.chunk_size))
+
+        def condition(i, *args):
+            maxlen = self.x.get_shape()[1]
+            return i*self.chunk_size < maxlen
+
+        def body(i, states, lengths, outputs):
+            chunk_outputs, states = tf.nn.bidirectional_dynamic_rnn(
+                self.cell_fw,
+                self.cell_bw,
+                tf.gather(self.x_stack,i),
+                dtype=tf.float32,
+                initial_state_fw=states[0],
+                initial_state_bw=states[1],
+                sequence_length=tf.minimum(tf.maximum(lengths, 1), self.chunk_size)
+            )
+
+            # transpose batch <-> time dimensions. Later TensorArray.concat() it will concat using the first dimension.
+
+            outputs = outputs.write(i, tf.transpose(tf.concat(chunk_outputs, axis=2), [1,0,2]))
+
+            return i+1, states, lengths-self.chunk_size, outputs
+
+        _,_,_,outputs_stack = tf.while_loop(condition, body, [0, states, self.l_batch, self.outputs_stack])
+
+        # Concat tensor array and restore original dimensions permutation
+        self.outputs = tf.transpose(outputs_stack.concat(), [1,0,2])
         if is_training:
-            cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
-                                                    output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True,
-                                                    dtype=tf.float32)
-            cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw,
-                                                    output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True,
-                                                    dtype=tf.float32)
-
-        self.initial_state_fw = cell_fw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
-        self.initial_state_bw = cell_bw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
-        # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
-
-        rnn_outputs, self.final_state = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw,
-            cell_bw,
-            x_batch,
-            dtype=tf.float32,
-            initial_state_fw=self.initial_state_fw,
-            initial_state_bw=self.initial_state_bw,
-            sequence_length=self.l_batch  # do not process padded parts
-        )
-
-        rnn_outputs = tf.concat(rnn_outputs, axis=2)
+            self.outputs = variational_dropout(self.outputs, drop_prob)
 
         # rnn_outputs, self.final_state = tf.nn.dynamic_rnn(
         #     cell,
@@ -79,7 +102,7 @@ class SimpleLstmModel(object):
         #     sequence_length=self.l_batch  # do not process padded parts
         # )
 
-        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])  # using bidirectional -> 2x hidden_size
+        matricied_x = tf.reshape(self.outputs, [-1, 2*hidden_size])  # using bidirectional -> 2x hidden_size
         softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
@@ -189,7 +212,7 @@ class SimpleLstmModel(object):
         return (np.mean(batch_loss), np.mean(batch_accs)), 100 * (hit_classes / true_classes)
 
 
-class SimpleLstmPipeline(object):
+class LstmPipeline(object):
     def __init__(self,
                  train,
                  val,
@@ -232,13 +255,13 @@ class SimpleLstmPipeline(object):
 
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
-                    self.train_model = SimpleLstmModel(config=config, input_data=train, is_training=True)
+                    self.train_model = LstmModel(config=config, input_data=train, is_training=True)
             with tf.name_scope('Validation'):
                 with tf.variable_scope('Model', reuse=True, initializer=initializer):
-                    self.val_model = SimpleLstmModel(config=config, input_data=val, is_training=False)
+                    self.val_model = LstmModel(config=config, input_data=val, is_training=False)
             with tf.name_scope('Test'):
                 with tf.variable_scope('Model', reuse=True, initializer=initializer):
-                    self.te_model = SimpleLstmModel(config=test_config, input_data=te, is_training=False)
+                    self.te_model = LstmModel(config=test_config, input_data=te, is_training=False)
 
             self.init_op = tf.global_variables_initializer()
 

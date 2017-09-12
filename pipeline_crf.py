@@ -75,7 +75,7 @@ class SimpleCrfModel(object):
         self.decoding, _ = crf2.crf_decode(unary_scores, transition_params, self.l_batch)
 
         reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        self.loss = tf.reduce_mean(-log_likelihood) + tf.add_n(reg_losses)
+        self.loss = tf.reduce_sum(-log_likelihood) + tf.add_n(reg_losses)
         if not is_training:
             return
 

@@ -31,8 +31,8 @@ class SimpleLstmModel(object):
         # Graph construction
 
         # Features, output labels, and binary mask of valid timesteps
-        self.x_batch = tf.placeholder(tf.float32, shape=[None, num_words, num_features])
-        self.y_batch = tf.placeholder(tf.int32, shape=[None, num_words])
+        self.x_batch = tf.placeholder(tf.float32, shape=[None, None, num_features])
+        self.y_batch = tf.placeholder(tf.int32, shape=[None, None])
         self.l_batch = tf.placeholder(tf.int32, shape=[None])
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
@@ -80,7 +80,7 @@ class SimpleLstmModel(object):
         # )
 
         matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])  # using bidirectional -> 2x hidden_size
-        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32)
+        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
         softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
 
@@ -97,13 +97,14 @@ class SimpleLstmModel(object):
         # ---
 
         # reshape to sequence format and mask padded timesteps
-        xent = tf.reshape(xent, [-1,num_words])
+        xent = tf.reshape(xent, [-1,tf.shape(self.y_batch)[1]])
         mask = tf.sequence_mask(self.l_batch)
         masked_xent = tf.boolean_mask(xent, mask)
 
         # compute loss and framewise predictions
-        self.loss = tf.reduce_mean(masked_xent)
-        self.predictions = tf.argmax(tf.reshape(logits, [-1,num_words,no_classes]), 2)
+        reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+        self.loss = tf.reduce_mean(masked_xent) + tf.add_n(reg_losses)
+        self.predictions = tf.argmax(tf.reshape(logits, [-1,tf.shape(self.y_batch)[1],no_classes]), 2)
 
         if not is_training:
             return
@@ -227,7 +228,7 @@ class SimpleLstmPipeline(object):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            initializer = tf.random_uniform_initializer(-0.1, 0.1)
+            initializer = tf.random_uniform_initializer(-0.01, 0.01)
 
             with tf.name_scope('Train'):
                 with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
