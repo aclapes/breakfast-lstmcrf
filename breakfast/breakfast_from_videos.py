@@ -136,7 +136,7 @@ def create(info_file, labels_file, max_length, frame_size, output_dir):
             x = vid_to_array(videos_data[key]['url'], frame_size=(height,width))
             y = generate_output(videos_data[key], labels, length=1)
 
-            f_dataset['video_features'][perm[i],:x.shape[0],:] = x.reshape([-1,height,width,3])
+            f_dataset['video_features'][perm[i],:x.shape[0]] = x
             f_dataset['outputs'][perm[i],:len(y)] = y
             f_dataset['lengths'][perm[i],0] = len(y)
 
@@ -206,7 +206,7 @@ if __name__ == '__main__':
         dest='output_dir',
         default='breakfast/dataset/',
         help=
-        'Directory where 3 hd5 files will be generated (training / validation / testing) (default: %(default)s)')
+        'Directory where 3 hdf5 files will be generated (training / validation / testing) (default: %(default)s)')
 
     args = parser.parse_args()
     print args
