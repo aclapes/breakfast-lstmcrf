@@ -8,10 +8,6 @@ from os.path import join
 from os import makedirs
 import time
 
-MAX_LEN = 10000
-HEIGHT = 224
-WIDTH = 224
-
 def import_labels(f):
     ''' Read from a file all the labels from it '''
     lines = f.readlines()
@@ -88,7 +84,7 @@ def vid_to_array(filepath, frame_size=None):
     return arr
 
 
-def create(info_file, labels_file, output_dir):
+def create(info_file, labels_file, max_length, frame_size, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         # uncomment if want to merge validation and testing
@@ -106,8 +102,12 @@ def create(info_file, labels_file, output_dir):
     except:
         pass
 
-    subsets = ['training', 'testing', 'validation']
+    if len(frame_size) == 1:
+        height = width = frame_size
+    else:
+        height, width = frame_size[:2]
 
+    subsets = ['training', 'testing', 'validation']
     for subset in subsets:
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
@@ -119,9 +119,9 @@ def create(info_file, labels_file, output_dir):
         output_file = join(output_dir, subset + '.h5')
         f_dataset = h5py.File(output_file, 'w')
 
-        f_dataset.create_dataset('video_features',(len(videos),MAX_LEN,HEIGHT*WIDTH*3), fillvalue=0,
-                            dtype=np.uint8, chunks=(1,100,HEIGHT*WIDTH*3), compression='gzip', compression_opts=9)
-        f_dataset.create_dataset('outputs',(len(videos),MAX_LEN), fillvalue=255,
+        f_dataset.create_dataset('video_features',(len(videos),max_length,height,width,3), fillvalue=0,
+                            dtype=np.uint8, chunks=(1,max_length//100,height,width,3), compression='gzip', compression_opts=9)
+        f_dataset.create_dataset('outputs',(len(videos),max_length), fillvalue=255,
                             dtype=np.uint8, chunks=(1,100), compression='gzip', compression_opts=9)
         f_dataset.create_dataset('lengths',(len(videos),1), fillvalue=0,
                             dtype=np.uint8)
@@ -133,10 +133,10 @@ def create(info_file, labels_file, output_dir):
             print('Reading %d/%d video and writing HDF5 file...' % (i,nb_videos-1))
             st_time = time.time()
 
-            x = vid_to_array(videos_data[key]['url'], frame_size=(HEIGHT,WIDTH))
+            x = vid_to_array(videos_data[key]['url'], frame_size=(height,width))
             y = generate_output(videos_data[key], labels, length=1)
 
-            f_dataset['video_features'][perm[i],:x.shape[0],:] = x.reshape([-1,HEIGHT*WIDTH*3])
+            f_dataset['video_features'][perm[i],:x.shape[0],:] = x.reshape([-1,height,width,3])
             f_dataset['outputs'][perm[i],:len(y)] = y
             f_dataset['lengths'][perm[i],0] = len(y)
 
@@ -181,6 +181,25 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
+        '-m',
+        '--max-length',
+        type=int,
+        dest='max_length',
+        default=10000,
+        help=
+        'Max length of sequences (default: %(default)s)')
+
+    parser.add_argument(
+        '-s',
+        '--frame-size',
+        nargs='+',
+        type=int,
+        dest='frame_size',
+        default=[224,224],
+        help=
+        'Resize frames to (default: %(default)s)')
+
+    parser.add_argument(
         '-o',
         '--output-dir',
         type=str,
@@ -194,4 +213,6 @@ if __name__ == '__main__':
 
     create(args.videos_info,
            args.labels,
+           args.max_length,
+           args.frame_size,
            args.output_dir)
