@@ -31,6 +31,9 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
         segm_files = os.listdir(os.path.join(path_segmentation, video_label))
         for segm_file in segm_files:
             if segm_file.endswith(config['segm_file_fmt']):
+                # print(segm_file)
+                # if segm_file == 'P30_cam02_P30_cereals.xml':
+                #     print(1)
                 # get video filename from segmentation file
                 video_filename = os.path.splitext(segm_file)[0]
 
@@ -56,6 +59,7 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                 # gather the rest of video metadata
                 video_md = imageio.get_reader(url).get_meta_data()
                 nframes = video_md['nframes']
+                fps = video_md['fps']
                 duration = video_md['duration']
                 size = video_md['size']
 
@@ -74,11 +78,11 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                     lines = f.readlines()[2:-2]
                     for line in lines:
                         name, st, end = re.findall('"([^"]*)"', line)
+                        st, end = float(st)-1, float(end)-1
                         # build annotation
                         label = name if name != 'SIL' else 'none'
                         json_content[video_filename]['annotations'].append(
-                            dict(segment=[(float(st)-1)/nframes * duration,
-                                          (float(end)-1)/nframes * duration],
+                            dict(segment=[float(st)/fps, (float(end)+1)/fps],
                                  label=label)
                         )
                         # keep track of action labels
