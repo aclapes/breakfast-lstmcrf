@@ -172,8 +172,24 @@ if __name__ == '__main__':
             optimizer_type=args.optimizer_type,
             clip_norm=args.clip_norm
         )
-    elif args.model_type == 'crf':
+        elif args.model_type == 'crf':
         m = SimpleCrfPipeline(
+            f_dataset['training'],
+            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
+            f_dataset['testing'],
+            f_dataset.attrs['no_classes'],
+            f_dataset['training']['class_weights'][:],
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'cnncrf':
+        m = SimpleCnnCrfPipeline(
             f_dataset['training'],
             f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
             f_dataset['testing'],

@@ -22,6 +22,27 @@ def read_data_generator(data, labels, lengths, batch_size=16):
         yield (x, y, l)
 
 
+def read_image_generator(images, labels, batch_size=256):
+    '''
+    This generator function serves a batch of the breakfast at each call.
+    See what a generator function is ;)
+    :param data:
+    :param labels:
+    :param lengths:
+    :param batch_size:
+    :return:
+    '''
+
+    n_batches = int(np.ceil(images.shape[0] / float(batch_size)))
+
+    for i in range(n_batches + 1):
+        # prepare the batch
+        x = images[(i * batch_size):((i + 1) * batch_size), :, :]  # batch features
+        y = labels[(i * batch_size):((i + 1) * batch_size), :]  # batch labels
+
+        yield (x, y)
+
+
 # def read_data_generator(data, labels, lengths, batch_size=16):
 #     '''
 #     This generator function serves a batch of the breakfast at each call.

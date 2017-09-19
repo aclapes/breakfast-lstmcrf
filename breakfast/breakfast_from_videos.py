@@ -107,7 +107,7 @@ def create(info_file, labels_file, max_length, frame_size, output_dir):
     else:
         height, width = frame_size[:2]
 
-    subsets = ['training', 'testing', 'validation']
+    subsets = ['testing', 'validation', 'training']
     for subset in subsets:
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
