@@ -66,7 +66,7 @@ def generate_output(video_info, labels, length=16):
 
     return instances
 
-def create(features_path, pool_op, pool_size, stride, info_file, labels_file, output_file):
+def create(features_path, pool_op, pool_size, stride, info_file, labels_file, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         # uncomment if want to merge validation and testing
@@ -81,7 +81,6 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
 
     dataset = dict()
     subsets = ['training', 'testing', 'validation']
-    # subsets = ['training', 'testing']  # substitute for above line to merge validation and testing
 
     class_counts = np.zeros((len(labels),), dtype=np.float32)
 
@@ -117,9 +116,10 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
     max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
     max_len = ((max_len // stride) + 1) * stride
 
-    f_dataset = h5py.File(output_file, 'w')
-
     for subset in subsets:
+        output_file = os.path.join(output_dir, subset + '.h5')
+        f_dataset = h5py.File(output_file, 'w')
+
         print('Creating HDF file for %s...' % (subset))
         videos = [
             key for key in videos_data.keys() if videos_data[key]['subset'] == subset
@@ -138,39 +138,38 @@ def create(features_path, pool_op, pool_size, stride, info_file, labels_file, ou
 
         perm = np.random.RandomState(42).permutation(len(videos))
 
-        f_dataset_subset = f_dataset.create_group(subset)
-        f_dataset_subset.create_dataset(
+        f_dataset.create_dataset(
             'video_features',
             data=video_features[perm,:,:],
-            chunks=(16, video_features.shape[1], video_features.shape[2]),
+            chunks=(10, video_features.shape[1], video_features.shape[2]),
             dtype='float32')
-        f_dataset_subset.create_dataset(
+        f_dataset.create_dataset(
             'outputs',
             data=outputs[perm,:],
-            chunks=(16, outputs.shape[1]),
+            chunks=(10, outputs.shape[1]),
             dtype='float32')
-        f_dataset_subset.create_dataset(
+        f_dataset.create_dataset(
             'lengths',
             data=lengths[perm],
-            chunks=(16,1),
+            chunks=(10,1),
             dtype='int32')
 
-        f_dataset_subset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
+        f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
 
-    # Save some additional attributes
-    f_dataset.attrs['no_classes'] = len(labels)
-    f_dataset.attrs['pool_op'] = pool_op
-    f_dataset.attrs['pool_size'] = pool_size
-    f_dataset.attrs['stride'] = stride
-    # f_dataset.attrs['class_weights'] = (np.max(class_counts)/class_counts)
+        # Save some additional attributes
+        f_dataset.attrs['no_classes'] = len(labels)
+        f_dataset.attrs['pool_op'] = pool_op
+        f_dataset.attrs['pool_size'] = pool_size
+        f_dataset.attrs['stride'] = stride
+        # f_dataset.attrs['class_weights'] = (np.max(class_counts)/class_counts)
 
-    f_dataset.close()
+        f_dataset.close()
 
-    # Sanity check
-    f_dataset = h5py.File(output_file, 'r')
-    # f_dataset.attrs['class_weights']
-    assert f_dataset.attrs['no_classes'] == len(labels)
-    f_dataset.close()
+        # Sanity check
+        f_dataset = h5py.File(output_file, 'r')
+        # f_dataset.attrs['class_weights']
+        assert f_dataset.attrs['no_classes'] == len(labels)
+        f_dataset.close()
 
 
 if __name__ == '__main__':
@@ -181,7 +180,7 @@ if __name__ == '__main__':
         '--features-dir',
         type=str,
         dest='features_dir',
-        default='/datasets/breakfast/fv/s1/',
+        default='/data/datasets/breakfast/fv/s1/',
         help=
         'Directory where features are stored (default: %(default)s)')
 
@@ -217,7 +216,7 @@ if __name__ == '__main__':
         '--pool-size',
         type=int,
         dest='pool_size',
-        default=5,
+        default=1,
         help=
         'Pooling stride (default: %(default)s)')
 
@@ -235,7 +234,7 @@ if __name__ == '__main__':
         '--output-file',
         type=str,
         dest='output_file',
-        default='breakfast/dataset.h5',
+        default='breakfast/dataset/',
         help=
         'Directory where hd5 file will be generated (default: %(default)s)')
 

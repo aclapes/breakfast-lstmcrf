@@ -88,15 +88,15 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                         # keep track of action labels
                         action_labels.setdefault(label,None)
 
+    with open(output_json_file, 'w') as f:
+        import json
+        json.dump(json_content, f, indent=2)
+
     with open(output_labels_file, 'w') as f:
         del action_labels['none']
         f.write('0\tnone\n')
         for i,label in enumerate(action_labels.keys()):
             f.write('{}\t{}\n'.format(i+1,label))
-
-    with open(output_json_file, 'w') as f:
-        import json
-        json.dump(json_content, f, indent=2)
 
     return
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         '--videos-dir',
         type=str,
         dest='videos_dir',
-        default='/datasets/breakfast/vid/',
+        default='/data/datasets/breakfast/vid/',
         help=
         'Directory containing the breakfast data (default: %(default)s)')
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         '--segmentations-dir',
         type=str,
         dest='segmentations_dir',
-        default='/datasets/breakfast/segmentation_coarse/',
+        default='/data/datasets/breakfast/segmentation_coarse/',
         help=
         'Directory containing the breakfast segmentation files (default: %(default)s)')
 

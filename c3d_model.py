@@ -22,6 +22,16 @@ forward to make predictions.
 
 import tensorflow as tf
 
+# The UCF-101 dataset has 101 classes
+NUM_CLASSES = 101
+
+# Images are cropped to (CROP_SIZE, CROP_SIZE)
+CROP_SIZE = 112
+CHANNELS = 3
+
+# Number of frames per video clip
+NUM_FRAMES_PER_CLIP = 16
+
 "-----------------------------------------------------------------------------------------------------------------------"
 
 
@@ -70,8 +80,7 @@ def inference_c3d(_X, _dropout, batch_size, _weights, _biases):
 
     # Fully connected layer
     pool5 = tf.transpose(pool5, perm=[0, 1, 4, 2, 3])
-    dense1 = tf.reshape(pool5, [batch_size, _weights['wd1'].get_shape().as_list()[
-        0]])  # Reshape conv3 output to fit dense layer input
+    dense1 = tf.reshape(pool5, [batch_size, _weights['wd1'].get_shape().as_list()[0]])  # Reshape conv3 output to fit dense layer input
     dense1 = tf.matmul(dense1, _weights['wd1']) + _biases['bd1']
 
     dense1 = tf.nn.relu(dense1, name='fc1')  # Relu activation
