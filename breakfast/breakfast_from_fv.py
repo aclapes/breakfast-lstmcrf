@@ -18,7 +18,7 @@ def import_labels(f):
         i += 1
     return labels
 
-def read_features(filepath, pool_op, length=8):
+def read_features(filepath, pool_op, length=16):
     import csv
     with open(filepath, 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter='\t')
