@@ -4,7 +4,8 @@ from progressbar import ProgressBar
 from tensorflow.contrib import rnn
 
 import src.crf as crf  # master's version of tf.contrib.crf
-from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
+from src.evaluation import compute_framewise_accuracy, compute_classwise_accuracy
+from src.preprocessing import compute_class_weights
 from src.reader import read_data_generator
 
 
@@ -21,7 +22,7 @@ class SimpleLstmcrfModel(object):
         optimizer_type = config['optimizer_type']
         learn_rate = config['learn_rate']
         decay_rate = config['decay_rate']
-        hidden_size = config['hidden_size']
+        hidden_state_size = config['hidden_size']
         drop_prob = config['drop_prob']
         clip_norm = config['clip_norm']
 
@@ -36,13 +37,15 @@ class SimpleLstmcrfModel(object):
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
 
-        x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+        # x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+        x_batch = self.x_batch
+
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
-        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        cell_fw = rnn.BasicLSTMCell(hidden_state_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
-        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
+        cell_bw = rnn.BasicLSTMCell(hidden_state_size, forget_bias=1.0, state_is_tuple=True,
                                  reuse=tf.get_variable_scope().reuse)
         if is_training:
             cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
@@ -70,10 +73,29 @@ class SimpleLstmcrfModel(object):
 
         rnn_outputs = tf.concat(rnn_outputs, axis=2)
 
-        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
-        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
-        softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
-        logits = tf.matmul(matricied_x, softmax_w) + softmax_b
+
+
+        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_state_size])
+
+        # Alternatives:
+        # (1)
+        # <---
+        hidden_neurons = hidden_state_size
+        hidden_w = tf.get_variable('hidden_w', [2*hidden_state_size, hidden_neurons], dtype=tf.float32)
+        hidden_b = tf.get_variable('hidden_b', [hidden_neurons], dtype=tf.float32, initializer=tf.zeros_initializer())
+        hidden_activations = tf.matmul(matricied_x, hidden_w) + hidden_b
+        if is_training:
+            hidden_activations = tf.nn.dropout(hidden_activations, keep_prob=(1-config['drop_prob']))
+
+        softmax_w = tf.get_variable('softmax_w', [hidden_neurons, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
+        softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.zeros_initializer())
+        logits = tf.matmul(hidden_activations, softmax_w) + softmax_b
+        # ---
+        # (2)
+        # softmax_w = tf.get_variable('softmax_w', [2*hidden_state_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
+        # softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+        # logits = tf.matmul(matricied_x, softmax_w) + softmax_b
+        # --->
 
         unary_scores = tf.reshape(logits, [-1, num_words, no_classes])
 
@@ -175,8 +197,7 @@ class SimpleLstmcrfPipeline(object):
                  train,
                  val,
                  te,
-                 no_classes,
-                 class_weights,
+                 class_weights_file,
                  batch_size,
                  learn_rate,
                  decay_rate,
@@ -189,8 +210,6 @@ class SimpleLstmcrfPipeline(object):
         self.num_epochs = num_epochs
 
         config = dict(
-            no_classes = no_classes,
-            class_weights = class_weights,
             batch_size = batch_size,
             num_words = train['video_features'].shape[1],
             num_features = train['video_features'].shape[2],
@@ -202,6 +221,14 @@ class SimpleLstmcrfPipeline(object):
             decay_rate = decay_rate
         )
 
+        try:
+            class_weights = np.load(class_weights_file)
+        except IOError, e:
+            class_weights = compute_class_weights(train, config['batch_size'])
+            np.save(class_weights_file, class_weights)
+
+        config['class_weights'] = class_weights
+        config['no_classes'] = len(class_weights)
         self.sorting = np.argsort(class_weights)  # using class weight criterion
 
         test_config = config.copy()
@@ -212,13 +239,13 @@ class SimpleLstmcrfPipeline(object):
             initializer = tf.random_uniform_initializer(-0.01, 0.01)
 
             with tf.name_scope('Train'):
-                with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
+                with tf.variable_scope('Model', reuse=False, initializer=initializer):
                     self.train_model = SimpleLstmcrfModel(config=config, input_data=train, is_training=True)
             with tf.name_scope('Validation'):
-                with tf.variable_scope('Model', reuse=True, initializer=initializer):
+                with tf.variable_scope('Model', reuse=True):
                     self.val_model = SimpleLstmcrfModel(config=config, input_data=val, is_training=False)
             with tf.name_scope('Test'):
-                with tf.variable_scope('Model', reuse=True, initializer=initializer):
+                with tf.variable_scope('Model', reuse=True):
                     self.te_model = SimpleLstmcrfModel(config=test_config, input_data=te, is_training=False)
 
             self.init_op = tf.global_variables_initializer()
@@ -259,11 +286,11 @@ class SimpleLstmcrfPipeline(object):
                 val_evals[e,:] = [loss_val, mof_val, moc_val]
 
                 # Train step (every few epochs). To see progress (not choosing based on this!)
-                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:
-                    (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
-                    moc_te = np.nanmean(te_class_evals)
-                    print te_class_evals[self.sorting]
-                    print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
+                # if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:
+                #     (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
+                #     moc_te = np.nanmean(te_class_evals)
+                #     print te_class_evals[self.sorting]
+                #     print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
 
             (_, mof_te), te_class_evals = self.te_model.run_epoch(session)
             moc_te = np.nanmean(te_class_evals)

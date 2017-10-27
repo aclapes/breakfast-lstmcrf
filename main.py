@@ -20,7 +20,7 @@ if __name__ == '__main__':
         '--input-dir',
         type=str,
         dest='input_dir',
-        default='./breakfast/dataset/',
+        default='./breakfast/dataset/pooled-20-0.5',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -38,7 +38,7 @@ if __name__ == '__main__':
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=12,
+        default=96,
         help=
         'Batch size (default: %(default)s)')
 
@@ -104,7 +104,7 @@ if __name__ == '__main__':
         '--hidden-size',
         type=int,
         dest='hidden_size',
-        default=512,
+        default=1024,
         help=
         'Hidden size (default: %(default)s)')
 
@@ -131,7 +131,7 @@ if __name__ == '__main__':
 
     # Read breakfast from hdf5 file
     f_training = h5py.File(os.path.join(args.input_dir, 'training.h5'), 'r')
-    f_validation = h5py.File(os.path.join(args.input_dir, 'validation.h5'), 'r')
+    f_validation = h5py.File(os.path.join(args.input_dir, 'testing.h5'), 'r')
     f_testing = h5py.File(os.path.join(args.input_dir, 'testing.h5'), 'r')
 
     # # Read breakfast from hdf5 file
@@ -141,22 +141,22 @@ if __name__ == '__main__':
     #     print('%s : %s' % (key, str(f_dataset.attrs[key])))
 
     # Create a model (choosen via argument passing)
-    # if args.model_type == 'lstmcrf':
-    #     m = SimpleLstmcrfPipeline(
-    #         f_training,
-    #         f_validation,
-    #         f_testing,
-    #         args.class_weights_file,
-    #         batch_size=args.batch_size,
-    #         learn_rate=args.learn_rate,
-    #         decay_rate=args.decay_rate,
-    #         num_epochs=args.num_epochs,
-    #         hidden_size=args.hidden_size,
-    #         drop_prob=args.drop_prob,
-    #         optimizer_type=args.optimizer_type,
-    #         clip_norm=args.clip_norm
-    #     )
-    if args.model_type == 'lstm':
+    if args.model_type == 'lstmcrf':
+        m = SimpleLstmcrfPipeline(
+            f_training,
+            f_validation,
+            f_testing,
+            args.class_weights_file,
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'lstm':
         m = SimpleLstmPipeline(
             f_training,
             f_validation,

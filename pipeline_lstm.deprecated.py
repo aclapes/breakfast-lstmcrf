@@ -3,7 +3,7 @@ import tensorflow as tf
 from progressbar import ProgressBar
 from tensorflow.contrib import rnn
 
-from evaluation import compute_framewise_accuracy
+from src.evaluation import compute_framewise_accuracy
 from src.reader import read_data_generator
 
 

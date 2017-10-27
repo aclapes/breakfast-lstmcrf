@@ -103,14 +103,14 @@ def next_multiple_of(x, y):
     return y * (x // y) + y
 
 
-def create(info_file, labels_file, frameskip, frame_size, output_dir):
+def create(info_file, labels_file, win_size, frame_size, output_dir):
     with open(info_file, 'r') as f:
         videos_data = json.load(f)
         # uncomment if want to merge validation and testing
         # ---
-        # for key, value in videos_data.iteritems():
-        #     if videos_data[key]['subset'] == 'validation':
-        #         videos_data[key]['subset'] = 'training'
+        for key, value in videos_data.iteritems():
+            if videos_data[key]['subset'] == 'validation':
+                videos_data[key]['subset'] = 'training'
         # ---
 
     with open(labels_file, 'r') as f:
@@ -137,16 +137,16 @@ def create(info_file, labels_file, frameskip, frame_size, output_dir):
 
         nr_frames_subset = 0
         for key in videos:
-            n = next_multiple_of(videos_data[key]['num_frames'], 16)
+            n = next_multiple_of(videos_data[key]['num_frames'], win_size)
             nr_frames_subset += n
             # nr_frames_subset += ( (n if n % frameskip != 0 else n+1) // frameskip )
-        nr_samples = nr_frames_subset/16  # should be the same as integer division ("//") at this point
+        nr_samples = nr_frames_subset/win_size  # should be the same as integer division ("//") at this point
 
         output_file = join(output_dir, subset + '.h5')
         f_dataset = h5py.File(output_file, 'w')
 
-        f_dataset.create_dataset('video_features',(nr_samples,16,height,width,3), chunks=(1,16,height,width,3), dtype=np.uint8, compression='gzip', compression_opts=9)
-        f_dataset.create_dataset('outputs', (nr_samples,16), dtype=np.uint8)
+        f_dataset.create_dataset('video_features',(nr_samples,win_size,height,width,3), chunks=(4,win_size,height,width,3), dtype=np.uint8, compression='gzip', compression_opts=9)
+        f_dataset.create_dataset('outputs', (nr_samples,win_size), dtype=np.uint8)
 
         class_counts = np.zeros((len(labels),), dtype=np.float32)
         perm = np.random.RandomState(42).permutation(nr_samples)
@@ -159,17 +159,19 @@ def create(info_file, labels_file, frameskip, frame_size, output_dir):
             X = vid_to_array(videos_data[key]['url'], frame_size=(height,width))
             Y = generate_output(videos_data[key], labels, length=1)
 
-            padding = next_multiple_of(X.shape[0],16) - X.shape[0]
+            padding = next_multiple_of(X.shape[0],win_size) - X.shape[0]
             X = np.pad(X, ((0,padding),(0,0),(0,0),(0,0)), 'constant', constant_values=(0,))
             Y = np.pad(Y, (0, padding), 'constant', constant_values=(0,))
 
-            X = np.reshape(X, [-1,16,112,112,3])
-            Y = np.reshape(Y, [-1,16])
+            X = np.reshape(X, [-1,win_size,height,width,3])
+            Y = np.reshape(Y, [-1,win_size])
 
             for k,(x,y) in enumerate(zip(X,Y)):
                 f_dataset['video_features'][perm[ptr]] = x
                 f_dataset['outputs'][perm[ptr]] = y
-                # class_counts[y] += 1
+                class_ids, counts = np.unique(y, return_counts=True)
+                for c, id in enumerate(class_ids):
+                    class_counts[id] += counts[c]
                 ptr += 1
 
             # # subsample
@@ -222,13 +224,13 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
-        '-fs',
-        '--frameskip',
+        '-ws',
+        '--win-size',
         type=int,
-        dest='frameskip',
+        dest='win_size',
         default=16,
         help=
-        'Frame skip (default: %(default)s)')
+        'Window size (default: %(default)s)')
 
     parser.add_argument(
         '-s',
@@ -236,7 +238,7 @@ if __name__ == '__main__':
         nargs='+',
         type=int,
         dest='frame_size',
-        default=[112,112],
+        default=[224,224],
         help=
         'Resize frames to (default: %(default)s)')
 
@@ -254,6 +256,6 @@ if __name__ == '__main__':
 
     create(args.videos_info,
            args.labels,
-           args.frameskip,
+           args.win_size,
            args.frame_size,
            args.output_dir)

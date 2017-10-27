@@ -26,6 +26,8 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
 
     action_labels = dict()  # several actions in each video
 
+    action_durations = dict()
+
     video_labels = np.sort(os.listdir(path_segmentation))  # video labels correspond to activities, not actions
     for i, video_label in enumerate(video_labels):
         segm_files = os.listdir(os.path.join(path_segmentation, video_label))
@@ -79,6 +81,7 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                     for line in lines:
                         name, st, end = re.findall('"([^"]*)"', line)
                         st, end = float(st)-1, float(end)-1
+                        action_durations.setdefault(name, []).append(end-(st-1)+1)
                         # build annotation
                         label = name if name != 'SIL' else 'none'
                         json_content[video_filename]['annotations'].append(
@@ -87,6 +90,15 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                         )
                         # keep track of action labels
                         action_labels.setdefault(label,None)
+
+    # not saving this, only for debugging purposes
+    # ---
+    for name, list_of_durations in action_durations.iteritems():
+        avg = np.mean(list_of_durations)
+        min = np.min(list_of_durations)
+        max = np.max(list_of_durations)
+        print('%s\t AVG=%.2f\t MIN=%.2f\t MAX=%.2f' % (name, avg, min, max))
+    # ---
 
     with open(output_json_file, 'w') as f:
         import json
@@ -97,6 +109,8 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
         f.write('0\tnone\n')
         for i,label in enumerate(action_labels.keys()):
             f.write('{}\t{}\n'.format(i+1,label))
+
+    print('Files saved')
 
     return
 

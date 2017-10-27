@@ -40,7 +40,8 @@ class SimpleLstmModel(object):
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, 2, batch_size, hidden_size])
 
-        x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+        # x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
+        x_batch = self.x_batch
         if is_training:
             x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
 
@@ -178,7 +179,7 @@ class SimpleLstmModel(object):
 
             vals = session.run(fetches=fetches, feed_dict=feed_dict)
 
-            print ' -> ', np.unique(vals['predictions'])
+            # print ' -> ', np.unique(vals['predictions'])
             # print vals['final_state'].h[0,:3]
             # state = vals['final_state']
             # if self.is_training:
@@ -327,6 +328,8 @@ class SimpleLstmPipeline(object):
             train_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
             val_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
 
+            mof_val_max = 0.
+
             for e in range(self.num_epochs):
                 print('Epoch: %d/%d' % (e + 1, self.num_epochs))
 
@@ -354,13 +357,14 @@ class SimpleLstmPipeline(object):
                 val_evals[e,:] = [loss_val, mof_val, moc_val]
 
                 # Train step (every few epochs). To see progress (not choosing based on this!)
-                if e in [10, 50, 100, 500, 1000, 2000, 10000, 20000]:
-                    # (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
-                    # moc_te = np.nanmean(te_class_evals)
-                    # print te_class_evals[self.sorting]
-                    # print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
-                    print 'writing'
-                    output_dir = os.path.join('/data/datasets/breakfast/lstm_outputs/', str(e).zfill(6))
+                if e > 20 and mof_val > mof_val_max:
+                    (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
+                    moc_te = np.nanmean(te_class_evals)
+                    print te_class_evals[self.sorting]
+                    print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
+
+                    print('Writing outputs...')
+                    output_dir = os.path.join('/data/datasets/breakfast/lstm_outputs_pooled-uFV_20win_50ovl/', str(e).zfill(6))
                     try:
                         os.makedirs(output_dir)
                     except:
@@ -368,6 +372,8 @@ class SimpleLstmPipeline(object):
                     self.train_model.write_epoch(session, os.path.join(output_dir, 'training_lstm_output.h5'))
                     self.val_model.write_epoch(session, os.path.join(output_dir, 'validation_lstm_output.h5'))
                     self.te_model.write_epoch(session, os.path.join(output_dir, 'testing_lstm_output.h5'))
+
+                    mof_val_max = mof_val
 
             (_, mof_te), te_class_evals = self.te_model.run_epoch(session)
             moc_te = np.nanmean(te_class_evals)

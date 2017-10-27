@@ -4,7 +4,7 @@ from progressbar import ProgressBar
 from tensorflow.contrib import rnn
 
 import src.crf as crf  # master's version of tf.contrib.crf
-from evaluation import compute_framewise_accuracy
+from src.evaluation import compute_framewise_accuracy
 from src.reader import read_data_generator
 
 
