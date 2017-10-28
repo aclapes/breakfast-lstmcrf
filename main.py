@@ -65,7 +65,7 @@ if __name__ == '__main__':
         '--num_epochs',
         type=int,
         dest='num_epochs',
-        default=2000,
+        default=200,
         help=
         'Num epochs (default: %(default)s)')
 

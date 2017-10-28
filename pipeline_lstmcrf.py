@@ -97,7 +97,8 @@ class SimpleLstmcrfModel(object):
         # logits = tf.matmul(matricied_x, softmax_w) + softmax_b
         # --->
 
-        unary_scores = tf.reshape(logits, [-1, num_words, no_classes])
+        unary_params = tf.get_variable("unary_params", [no_classes])
+        unary_scores = tf.reshape(tf.multiply(logits, unary_params), [-1, num_words, no_classes])
 
         # Compute the log-likelihood of the gold sequences and keep the transition
         # params for inference at test time.

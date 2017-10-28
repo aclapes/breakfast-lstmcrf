@@ -41,23 +41,33 @@ class Simple2DCnnModel(object):
         def gen():
             """ A simple data iterator """
             n =  self.input_data.shape[0]
-            perm = np.random.RandomState(42).permutation(n)
+            perm = np.random.permutation(n)
             for i in range(n):
                 yield (self.input_data[perm[i]]['image'].astype(np.float32),  self.input_data[perm[i]]['label'])
             return
 
         def preprocessing(x,y):
-            # random crop
+            # Step: random crops
+            # Description: half of them HxW, and the others (H/2)x(W/2) scaled back to HxW.
+            height = width = 224
             x_first, x_last = tf.split(x, num_or_size_splits=2, axis=0)
 
-            x_big = tf.image.extract_glimpse(x_first, [224, 224], tf.random_uniform([batch_size//2, 2], minval=-1, maxval=1))
+            x_big = tf.image.extract_glimpse(x_first,
+                                             [height, width],
+                                             tf.random_uniform([batch_size//2, 2], minval=-1, maxval=1))
+            x_small = tf.image.extract_glimpse(x_last,
+                                               [height//2, width//2],
+                                               tf.random_uniform([batch_size//2, 2], minval=-1, maxval=1))
 
-            x_small = tf.image.extract_glimpse(x_last, [112, 112], tf.random_uniform([batch_size//2, 2], minval=-1, maxval=1))
-            x_small = tf.image.resize_images(x_small, [224,224], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR, align_corners=False)
+            x_small = tf.image.resize_images(x_small,
+                                             [height, width],
+                                             method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+                                             align_corners=False)
 
             x = tf.concat([x_big, x_small], axis=0)
 
-            # ...
+            # Step: ...
+
             return x,y
 
         with tf.device('/cpu:0'):
@@ -554,7 +564,7 @@ if __name__ == '__main__':
 
     # Create a model (choosen via argument passing)
     m = Simple2DCnnPipeline(
-        os.path.join(args.input_dir, 'testing.h5'),
+        os.path.join(args.input_dir, 'testing.test.h5'),
         os.path.join(args.input_dir, 'testing.h5'),
         os.path.join(args.input_dir, 'testing.h5'),
         args.class_weights_file,
