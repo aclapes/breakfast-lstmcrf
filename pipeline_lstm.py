@@ -1,13 +1,14 @@
+import os
+
+import h5py
 import numpy as np
 import tensorflow as tf
-import os
 from progressbar import ProgressBar
 from tensorflow.contrib import rnn
-import h5py
 
-from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
-from src.reader import read_data_generator
+from src.evaluation import compute_framewise_accuracy, compute_classwise_accuracy
 from src.preprocessing import compute_class_weights
+from src.reader import read_data_generator
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 np.set_printoptions(precision=2, linewidth=150)
