@@ -1,8 +1,6 @@
 from itertools import cycle
 import numpy as np
 
-def foo():
-
 
 videos = [np.random.randint(10,99,(108,)),
           np.random.randint(10,99,(31,)),

@@ -5,32 +5,27 @@ import numpy as np
 import imageio
 import argparse
 
+# Define test split:
+CONFIG = dict(
+    subsets = {
+        's1': '(P03_|P04_|P05_|P06_|P07_|P08_|P09_|P10_|P11_|P12_|P13_|P14_|P15_)',
+        's2': '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_|P27_|P28_)',
+        's3': '(P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_)',
+        's4': '(P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
+    },
+    segm_file_fmt = '.xml'
+)
 
 def create_json_and_labels(path_videos, path_segmentation, output_labels_file, output_json_file):
-    config = dict()
-
-    # Define test split:
-    config['pattern_test'] = '(P03_|P04_|P05_|P06_|P07_|P08_|P09_|P10_|P11_|P12_|P13_|P14_|P15_)'
-
-    # Define training (and validation). Decide whether or not to have a validation split:
-    # </---
-    # config['pattern_train'] = '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_|P27_|P28_|P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_|P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
-    # ---
-    config['pattern_train'] = '(P27_|P28_|P29_|P30_|P31_|P32_|P33_|P34_|P35_|P36_|P37_|P38_|P39_|P40_|P41_|P42_|P43_|P44_|P45_|P46_|P47_|P48_|P49_|P50_|P51_|P52_|P53_|P54_)'
-    config['pattern_val'] =  '(P16_|P17_|P18_|P19_|P20_|P21_|P22_|P23_|P24_|P25_|P26_)'
-    # ---/>
-
-    config['segm_file_fmt'] = '.xml'
-
     json_content = dict()
-
     action_labels = dict()  # several actions in each video
+    action_durations = dict()
 
     video_labels = np.sort(os.listdir(path_segmentation))  # video labels correspond to activities, not actions
     for i, video_label in enumerate(video_labels):
         segm_files = os.listdir(os.path.join(path_segmentation, video_label))
         for segm_file in segm_files:
-            if segm_file.endswith(config['segm_file_fmt']):
+            if segm_file.endswith(CONFIG['segm_file_fmt']):
                 # print(segm_file)
                 # if segm_file == 'P30_cam02_P30_cereals.xml':
                 #     print(1)
@@ -47,14 +42,15 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                     if os.path.exists(url):
                         break
 
+                def get_subset(sid):
+                    for subset, sids in CONFIG['subsets'].iteritems():
+                        if sid in sids:
+                            return subset
+                    raise ValueError('Partition not found for subject id: %s' % (sid))
+
                 # get data partition
                 sid = video_filename.split('_')[0]
-                if sid in config['pattern_train']:
-                    subset = 'training'
-                elif sid in config['pattern_val']:
-                    subset = 'validation'
-                else:
-                    subset = 'testing'
+                subset = get_subset(sid)
 
                 # gather the rest of video metadata
                 video_md = imageio.get_reader(url).get_meta_data()
@@ -79,6 +75,7 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                     for line in lines:
                         name, st, end = re.findall('"([^"]*)"', line)
                         st, end = float(st)-1, float(end)-1
+                        action_durations.setdefault(name, []).append(end-(st-1)+1)
                         # build annotation
                         label = name if name != 'SIL' else 'none'
                         json_content[video_filename]['annotations'].append(
@@ -88,15 +85,26 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                         # keep track of action labels
                         action_labels.setdefault(label,None)
 
+    # not saving this, only for debugging purposes
+    # ---
+    for name, list_of_durations in action_durations.iteritems():
+        avg = np.mean(list_of_durations)
+        min = np.min(list_of_durations)
+        max = np.max(list_of_durations)
+        print('%s\t AVG=%.2f\t MIN=%.2f\t MAX=%.2f' % (name, avg, min, max))
+    # ---
+
+    with open(output_json_file, 'w') as f:
+        import json
+        json.dump(json_content, f, indent=2)
+
     with open(output_labels_file, 'w') as f:
         del action_labels['none']
         f.write('0\tnone\n')
         for i,label in enumerate(action_labels.keys()):
             f.write('{}\t{}\n'.format(i+1,label))
 
-    with open(output_json_file, 'w') as f:
-        import json
-        json.dump(json_content, f, indent=2)
+    print('Files saved')
 
     return
 
@@ -109,7 +117,7 @@ if __name__ == "__main__":
         '--videos-dir',
         type=str,
         dest='videos_dir',
-        default='/datasets/breakfast/vid/',
+        default='/data/datasets/breakfast/vid/',
         help=
         'Directory containing the breakfast data (default: %(default)s)')
 
@@ -118,7 +126,7 @@ if __name__ == "__main__":
         '--segmentations-dir',
         type=str,
         dest='segmentations_dir',
-        default='/datasets/breakfast/segmentation_coarse/',
+        default='/data/datasets/breakfast/segmentation_coarse/',
         help=
         'Directory containing the breakfast segmentation files (default: %(default)s)')
 

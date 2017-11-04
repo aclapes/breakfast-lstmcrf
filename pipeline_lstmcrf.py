@@ -1,29 +1,31 @@
 import numpy as np
 import tensorflow as tf
-
 from progressbar import ProgressBar
-
 from tensorflow.contrib import rnn
+
 import src.crf as crf  # master's version of tf.contrib.crf
-
-from reader import read_data_generator
-from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
-
+from src.evaluation import compute_framewise_accuracy, compute_classwise_accuracy
+from src.preprocessing import compute_class_weights
+from src.reader import read_data_generator
+import exceptions
 
 class SimpleLstmcrfModel(object):
-    def __init__(self, config, input_data, is_training):
+    def __init__(self, config, input_data, test_subset, summaries_dir, is_training=False):
         self.config = config
-        self.input_data = input_data
+
+        self.dataset = input_data['dataset']
+        self.lengths = input_data['lengths']
+        test_mask = (np.array(input_data['subsets']) == test_subset)
+        self.indices_sb = np.where(test_mask == (False if is_training else True))[0]
+
         self.is_training = is_training
 
-        no_classes = config['no_classes']
+        num_classes = config['num_classes']
         batch_size = config['batch_size']
-        num_words = config['num_words']
-        num_features = config['num_features']
         optimizer_type = config['optimizer_type']
         learn_rate = config['learn_rate']
         decay_rate = config['decay_rate']
-        hidden_size = config['hidden_size']
+        hidden_state_size = config['hidden_size']
         drop_prob = config['drop_prob']
         clip_norm = config['clip_norm']
 
@@ -32,32 +34,99 @@ class SimpleLstmcrfModel(object):
         # Graph construction
 
         # Features, output labels, and binary mask of valid timesteps
-        self.x_batch = tf.placeholder(tf.float32, shape=[None, num_words, num_features])
-        self.y_batch = tf.placeholder(tf.int32, shape=[None, num_words])
-        self.l_batch = tf.placeholder(tf.int32, shape=[None])
+        # self.x_batch = tf.placeholder(tf.float32, shape=[None, num_words, num_features])
+        # self.y_batch = tf.placeholder(tf.int32, shape=[None, num_words])
+        # self.l_batch = tf.placeholder(tf.int32, shape=[None])
 
         # self.state_placeholder = tf.placeholder(tf.float32, shape=[2, batch_size, hidden_size])
 
-        x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
-        if is_training:
-            x_batch = tf.nn.dropout(x_batch, keep_prob=1.0)  # TODO: experiment with this dropout
+        # x_batch = self.x_batch
 
-        cell_fw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
-                                 reuse=tf.get_variable_scope().reuse)
-        cell_bw = rnn.BasicLSTMCell(hidden_size, forget_bias=1.0, state_is_tuple=True,
-                                 reuse=tf.get_variable_scope().reuse)
-        if is_training:
-            cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
-                                                    output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True,
-                                                    dtype=tf.float32)
-            cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw,
-                                                    output_keep_prob=1-drop_prob,
-                                                    variational_recurrent=True,
-                                                    dtype=tf.float32)
+        # def gen():
+        #     """ A simple data iterator """
+        #     n =  self.data_indices.shape[0]
+        #     perm = np.random.permutation(n)
+        #     end = self.config['batch_size']*(n//self.config['batch_size']) # discard last batch
+        #     perm = perm[:end]
+        #     for i in perm:
+        #         idx = self.data_indices[i]
+        #         video_features = np.reshape(self.input_data[idx]['video_features'], [len(self.input_data[idx]['outputs']),-1])
+        #         outputs = self.input_data[idx]['outputs']
+        #         yield (video_features, outputs)
 
-        self.initial_state_fw = cell_fw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
-        self.initial_state_bw = cell_bw.zero_state(tf.shape(self.x_batch)[0], dtype=np.float32)
+        def gen():
+            """ A simple data iterator """
+            perm = np.random.permutation(self.indices_sb.shape[0])
+            n = len(perm)
+            num_batches = int(np.ceil(float(n)/self.config['batch_size'])) # discard last batch
+
+            for b in range(num_batches):
+                ptr_b = b * self.config['batch_size']
+                batch_size = min(self.config['batch_size'], n-ptr_b)
+
+                video_features_b = []
+                outputs_b = []
+                lengths_b = [self.lengths[self.indices_sb[perm[ptr_b+i]]] for i in range(batch_size)]
+
+                maxlen_b = np.max(lengths_b)
+                for i in range(batch_size):
+                    idx = self.indices_sb[perm[ptr_b+i]]
+                    instance = self.dataset[idx]
+                    length = self.lengths[idx]
+
+                    video_features = np.pad(np.reshape(instance['video_features'], [self.lengths[idx], -1]),
+                                            ((0, maxlen_b-length), (0, 0)),
+                                            'constant', constant_values=0)
+
+                    outputs = np.pad(instance['outputs'], (0, maxlen_b-length), 'constant', constant_values=0)
+
+                    video_features_b.append(video_features)
+                    outputs_b.append(outputs)
+
+                yield (np.array(video_features_b), np.array(outputs_b), lengths_b)
+
+        with tf.device('/cpu:0'):
+            # <--- DEBUG (gen function)
+            # g = gen()
+            # x_batch, y_batch, l_batch = g.next()
+            # DEBUG --->
+
+            ds = (
+                tf.data.Dataset.from_generator(
+                    gen,
+                    (tf.float32, tf.int32, tf.int32),
+                    (
+                       tf.TensorShape([None,None,64]),
+                       tf.TensorShape([None,None]),
+                       tf.TensorShape([None,])
+                    )
+                 )
+                .prefetch(2)
+            )
+
+            self.iterator = ds.make_initializable_iterator()
+            x_batch, y_batch, l_batch = self.iterator.get_next()
+
+        cell_fw = rnn.BasicLSTMCell(hidden_state_size, forget_bias=1.0, state_is_tuple=True,
+                                 reuse=tf.get_variable_scope().reuse)
+        cell_bw = rnn.BasicLSTMCell(hidden_state_size, forget_bias=1.0, state_is_tuple=True,
+                                 reuse=tf.get_variable_scope().reuse)
+
+        cell_fw = tf.nn.rnn_cell.DropoutWrapper(cell_fw,
+                                                state_keep_prob=(0.5 if is_training else 1),
+                                                output_keep_prob=(0.2 if is_training else 1),
+                                                variational_recurrent=True,
+                                                input_size=tf.TensorShape([None,None,64]),
+                                                dtype=tf.float32)
+        cell_bw = tf.nn.rnn_cell.DropoutWrapper(cell_bw,
+                                                state_keep_prob=(0.5 if is_training else 1),
+                                                output_keep_prob=(0.2 if is_training else 1),
+                                                variational_recurrent=True,
+                                                input_size=tf.TensorShape([None, None, 64]),
+                                                dtype=tf.float32)
+
+        self.initial_state_fw = cell_fw.zero_state(tf.shape(x_batch)[0], dtype=np.float32)
+        self.initial_state_bw = cell_bw.zero_state(tf.shape(x_batch)[0], dtype=np.float32)
         # self.initial_state = tf.nn.rnn_cell.LSTMStateTuple(self.state_placeholder[0], self.state_placeholder[1])
 
         rnn_outputs, self.final_state = tf.nn.bidirectional_dynamic_rnn(
@@ -67,47 +136,90 @@ class SimpleLstmcrfModel(object):
             dtype=tf.float32,
             initial_state_fw=self.initial_state_fw,
             initial_state_bw=self.initial_state_bw,
-            sequence_length=self.l_batch  # do not process padded parts
+            sequence_length=l_batch  # do not process padded parts
         )
 
         rnn_outputs = tf.concat(rnn_outputs, axis=2)
+        # rnn_outputs = tf.nn.dropout(rnn_outputs, keep_prob=(0.2 if is_training else 1))
+        # rnn_outputs = tf.concat([x_batch, rnn_outputs], axis=2)
 
-        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_size])
-        softmax_w = tf.get_variable('softmax_w', [2*hidden_size, no_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
-        softmax_b = tf.get_variable('softmax_b', [no_classes], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+        matricied_x = tf.reshape(rnn_outputs, [-1, 2*hidden_state_size])
+        # Alternatives:
+        # (1)
+        # <---
+        # hidden_neurons = hidden_state_size
+        # hidden_w = tf.get_variable('hidden_w', [2*hidden_state_size, hidden_neurons], dtype=tf.float32)
+        # hidden_b = tf.get_variable('hidden_b', [hidden_neurons], dtype=tf.float32, initializer=tf.zeros_initializer())
+        # hidden_activations = tf.matmul(matricied_x, hidden_w) + hidden_b
+        # if is_training:
+        #     hidden_activations = tf.nn.dropout(hidden_activations, keep_prob=0.5)
+        #
+        # softmax_w = tf.get_variable('softmax_w', [hidden_neurons, num_classes], dtype=tf.float32, regularizer=tf.contrib.layers.l1_regularizer(scale=0.001))
+        # softmax_b = tf.get_variable('softmax_b', [num_classes], dtype=tf.float32, initializer=tf.zeros_initializer())
+        # logits = tf.matmul(hidden_activations, softmax_w) + softmax_b
+        # ---
+        # (2)
+        softmax_w = tf.get_variable('softmax_w', [2*hidden_state_size, num_classes], dtype=tf.float32)
+        softmax_b = tf.get_variable('softmax_b', [num_classes], dtype=tf.float32)
         logits = tf.matmul(matricied_x, softmax_w) + softmax_b
+        # ---
+        # (3)
+        # softmax_w = tf.get_variable('softmax_w', [2*hidden_state_size, 64], dtype=tf.float32)
+        # softmax_b = tf.get_variable('softmax_b', [128], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+        # logits = tf.tanh(tf.matmul(matricied_x, softmax_w))
+        #
+        # softmax_w2 = tf.get_variable('softmax_w2', [64, 64], dtype=tf.float32)
+        # # softmax_b2 = tf.get_variable('softmax_b2', [64], dtype=tf.float32, initializer=tf.constant_initializer(0.0))
+        # logits2 = tf.tanh(tf.matmul(matricied_x2, softmax_w2))
+        # # --->
+        #
+        # logits = tf.concat([logits,logits2], axis=1) + softmax_b
 
-        unary_scores = tf.reshape(logits, [-1, num_words, no_classes])
+        unary_params = tf.get_variable("unary_params", shape=[num_classes], dtype=tf.float32)
+        unary_scores = tf.reshape(tf.multiply(logits, unary_params), [-1, tf.shape(rnn_outputs)[1], num_classes])
+        # unary_scores = tf.reshape(logits, [-1, tf.shape(rnn_outputs)[1], 128])
 
         # Compute the log-likelihood of the gold sequences and keep the transition
         # params for inference at test time.
         log_likelihood, transition_params = crf.crf_log_likelihood(
-            unary_scores, self.y_batch, self.l_batch)
+            unary_scores, y_batch, l_batch)
 
-        # compute loss and framewise predictions
-        reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        self.loss = tf.reduce_mean(-log_likelihood) + tf.add_n(reg_losses)
+        with tf.name_scope('cost'):
+            # compute loss and framewise predictions
+            # reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            self.loss = tf.reduce_mean(-log_likelihood) #+ tf.add_n(reg_losses)
+            tf.summary.scalar('loss', self.loss)
 
-        self.predictions, _ = crf.crf_decode(unary_scores, transition_params, self.l_batch)
+        with tf.name_scope('evaluation'):
+            self.predictions, _ = crf.crf_decode(unary_scores, transition_params, l_batch)
+            self.y_batch = y_batch
+            self.l_batch = l_batch
+            equality = tf.cast(tf.equal(self.predictions, y_batch), tf.float32)
+            mask = tf.sequence_mask(l_batch, tf.shape(y_batch)[1])
+            self.acc = tf.reduce_sum(tf.boolean_mask(equality, mask)) / tf.reduce_sum(tf.cast(mask, tf.float32))
+            tf.summary.scalar('accuracy', self.acc)
 
-        if not is_training:
-            return
-
-        global_step = tf.Variable(0, trainable=False)
-        boundaries = (np.array([100, 1000], dtype=np.int32) * batch_size).tolist()
+        self.global_step = tf.Variable(0, trainable=False)
+        boundaries = (np.array([5,10], dtype=np.int32) * batch_size).tolist()
         values = [learn_rate/(decay_rate**i) for i in range(len(boundaries)+1)]
-        curr_learn_rate = tf.train.piecewise_constant(global_step, boundaries, values, name=None)
+        curr_learn_rate = tf.train.piecewise_constant(self.global_step, boundaries, values, name=None)
 
         if optimizer_type == 'sgd':
             self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=curr_learn_rate)
         elif optimizer_type == 'adam':
             self.optimizer = tf.train.AdamOptimizer(learning_rate=curr_learn_rate)
 
-        tvars = tf.trainable_variables()
-        self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clip_norm=clip_norm)
-        self.train_op = self.optimizer.apply_gradients(zip(self.grads, tvars), global_step=global_step)
+        # tvars = tf.trainable_variables()
+        # self.grads, _ = tf.clip_by_global_norm(tf.gradients(self.loss, tvars), clip_norm=clip_norm)
+        # self.train_op = self.optimizer.apply_gradients(zip(self.grads, tvars), global_step=global_step)
+        self.train_op = self.optimizer.minimize(self.loss, global_step=self.global_step)
 
-    def run_epoch(self, session):
+        self.merge_summaries_op = tf.summary.merge_all()
+
+        self.writer = tf.summary.FileWriter(summaries_dir, tf.get_default_graph())
+
+
+    def run_epoch(self, session, epoch_nr):
         '''
         Iterate over all batches.
         :param session:
@@ -115,70 +227,57 @@ class SimpleLstmcrfModel(object):
         :return:
         '''
 
-        self.reader = read_data_generator(self.input_data['video_features'],
-                                          self.input_data['outputs'],
-                                          self.input_data['lengths'][:, -1],
-                                          batch_size=self.config['batch_size'])
-
-        num_instances = self.input_data['video_features'].shape[0]
-        num_batches = int(np.ceil(num_instances / float(self.config['batch_size'])))
-        batch_loss = [None] * num_batches
-        batch_accs = [None] * num_batches
-
-        # state = session.run(self.initial_state)
-        # state = np.zeros((2, self.config['batch_size'], self.config['hidden_size']), dtype=np.float32)
+        batch_loss = []
+        batch_accs = []
 
         fetches = {
             'loss': self.loss,
+            'acc' : self.acc,
             # 'final_state': self.final_state,
             'predictions': self.predictions,
+            'y_batch' : self.y_batch,
+            'l_batch' : self.l_batch,
+            'summaries' : self.merge_summaries_op
         }
         if self.is_training:
             fetches['train_op'] = self.train_op
             # fetches['curr_learn_rate'] = self.curr_learn_rate
             # fetches['grads'] = self.grads
 
-        hit_classes = np.zeros((len(self.class_weights),), dtype=np.float32)
-        true_classes = np.zeros((len(self.class_weights),), dtype=np.float32)
+        num_batches = int(np.ceil(len(self.indices_sb)/float(self.config['batch_size'])))
+        session.run(self.iterator.initializer)
+        try:
+            bar = ProgressBar(max_value=num_batches)
+            for batch_i in range(num_batches):
+                bar.update(batch_i)
 
-        progbar = ProgressBar(max_value=num_batches)
-        for b in range(num_batches):
-            batch = self.reader.next()
+                vals = session.run(fetches=fetches)
 
-            # c, h = self.initial_state
-            # feed_dict[c] = state.c
-            # feed_dict[h] = state.h
-            feed_dict = {self.x_batch: batch[0], self.y_batch: batch[1], self.l_batch: batch[2]}
-                         # self.state_placeholder: state}
+                # print(' -> loss=%.5f, acc(mof)=%2.2f%%' % (vals['loss'], 100.0 * vals['acc']))
 
-            vals = session.run(fetches=fetches, feed_dict=feed_dict)
+                batch_loss.append(vals['loss'])
+                batch_accs.append(vals['acc'])
 
-            # print vals['final_state'].h[0,:3]
-            # state = vals['final_state']
-            # if self.is_training:
-                # print vals['curr_learn_rate']
+                self.writer.add_summary(vals['summaries'], global_step=epoch_nr*num_batches+batch_i)
 
-            batch_loss[b] = vals['loss']
-            batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1], batch[2])
-            hits, trues = compute_classwise_accuracy(vals['predictions'], batch[1], batch[2], self.class_weights)
-            hit_classes += hits
-            true_classes += trues
-            # if num_batches < num_instances:
-            #     print 100.* (hits/trues)
+                batch_i += 1
+            bar.finish()
+        except tf.errors.OutOfRangeError, e:
+            raise e
+        except exceptions.StopIteration, e:
+            raise e
 
-            progbar.update(b)
-        progbar.finish()
+        mean_loss = np.mean(batch_loss)
+        mean_acc = np.mean(batch_accs)
 
-        return (np.mean(batch_loss), np.mean(batch_accs)), 100 * (hit_classes / true_classes)
+        return (mean_loss, mean_acc) #, 100*(hit_classes/true_classes)
 
 
 class SimpleLstmcrfPipeline(object):
     def __init__(self,
-                 train,
-                 val,
-                 te,
-                 no_classes,
-                 class_weights,
+                 input_data,
+                 test_subset,
+                 class_weights_file,
                  batch_size,
                  learn_rate,
                  decay_rate,
@@ -191,11 +290,9 @@ class SimpleLstmcrfPipeline(object):
         self.num_epochs = num_epochs
 
         config = dict(
-            no_classes = no_classes,
-            class_weights = class_weights,
             batch_size = batch_size,
-            num_words = train['video_features'].shape[1],
-            num_features = train['video_features'].shape[2],
+            # num_words = 1000, #input_data.attrs['max_len'],
+            # num_features = 64, #input_data.attrs['num_features'],
             hidden_size = hidden_size,
             drop_prob = drop_prob,
             optimizer_type = optimizer_type,
@@ -204,74 +301,81 @@ class SimpleLstmcrfPipeline(object):
             decay_rate = decay_rate
         )
 
+        # try:
+        #     class_weights = np.load(class_weights_file)
+        # except IOError, e:
+        #     class_weights = compute_class_weights(train, config['batch_size'])
+        #     np.save(class_weights_file, class_weights)
+        class_weights = input_data['class_weights']
+
+        config['class_weights'] = class_weights
+        config['num_classes'] = len(class_weights)
         self.sorting = np.argsort(class_weights)  # using class weight criterion
+
+        val_config = config.copy()
 
         test_config = config.copy()
         test_config['batch_size'] = 1
 
         self.graph = tf.Graph()
         with self.graph.as_default():
-            initializer = tf.random_uniform_initializer(-0.01, 0.01)
-
             with tf.name_scope('Train'):
-                with tf.variable_scope('Model', reuse=False, initializer=initializer): #, initializer=initializer):
-                    self.train_model = SimpleLstmcrfModel(config=config, input_data=train, is_training=True)
+                with tf.variable_scope('Model', reuse=False, initializer=tf.random_uniform_initializer(-0.01, 0.01)):
+                    self.train_model = SimpleLstmcrfModel(config=config, input_data=input_data,
+                                                          test_subset=test_subset,
+                                                          summaries_dir='../log/breakfast/train',
+                                                          is_training=True,
+
+                                                          )
             with tf.name_scope('Validation'):
-                with tf.variable_scope('Model', reuse=True, initializer=initializer):
-                    self.val_model = SimpleLstmcrfModel(config=config, input_data=val, is_training=False)
+                with tf.variable_scope('Model', reuse=True):
+                    self.val_model = SimpleLstmcrfModel(config=val_config, input_data=input_data,
+                                                        test_subset=test_subset,
+                                                        summaries_dir='../log/breakfast/val',
+                                                        is_training=False,
+                                                        )
             with tf.name_scope('Test'):
-                with tf.variable_scope('Model', reuse=True, initializer=initializer):
-                    self.te_model = SimpleLstmcrfModel(config=test_config, input_data=te, is_training=False)
+                with tf.variable_scope('Model', reuse=True):
+                    self.te_model = SimpleLstmcrfModel(config=test_config, input_data=input_data,
+                                                       test_subset=test_subset,
+                                                       summaries_dir='../log/breakfast/test',
+                                                       is_training=False,
+                                                       )
 
             self.init_op = tf.global_variables_initializer()
+            # Add ops to save and restore all the variables.
+            self.saver = tf.train.Saver()
 
 
     def run(self, gpu_options):
-        np.set_printoptions(precision=2,linewidth=150)
+        np.set_printoptions(precision=2,linewidth=200)
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
-            session.run(self.init_op)
-
-            train_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
-            val_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
+            try:
+                self.saver.restore(
+                    session,
+                    tf.train.latest_checkpoint('/data/datasets/breakfast/models/lstmcrf/')
+                )
+            except ValueError, e:
+                session.run(self.init_op)
 
             for e in range(self.num_epochs):
-                print('Epoch: %d/%d' % (e + 1, self.num_epochs))
+                print('Epoch: %d/%d' % (e+1, self.num_epochs))
 
                 # Train step
-                (loss_train, mof_train), train_class_evals = self.train_model.run_epoch(session)
-                moc_train = np.nanmean(train_class_evals)
+                loss_train, mof_train = self.train_model.run_epoch(session, e)
+                print('[Training epoch] loss=%.5f, acc=%2.2f%%' % (loss_train, 100.0 * mof_train))
 
                 # Validation step
-                (loss_val, mof_val), val_class_evals = self.val_model.run_epoch(session)
-                moc_val = np.nanmean(val_class_evals)
+                loss_val, mof_val = self.val_model.run_epoch(session, e)
+                print('[Validation epoch] loss=%.5f, acc=%2.2f%%' % (loss_val, 100.0 * mof_val))
 
-                # Print summary
-                print(
-                    'TRAIN (loss/mof/moc): %.4f/%.2f%%/%.2f%%, VAL (loss/mof/moc): %.4f/%.2f%%/%.2f%%' % (
-                        loss_train, mof_train, moc_train, loss_val, mof_val, moc_val
-                    )
-                )
-
-                # Print per-class accuracies
-                print train_class_evals[self.sorting]
-                print val_class_evals[self.sorting]
-
-                # Keep track of loss/mof/moc across epochs
-                train_evals[e,:] = [loss_train, mof_train, moc_train]
-                val_evals[e,:] = [loss_val, mof_val, moc_val]
-
-                # Train step (every few epochs). To see progress (not choosing based on this!)
-                if e in [5, 10, 50, 100, 500, 1000, 2000, 10000, 20000]:
-                    (loss_te, mof_te), te_class_evals = self.te_model.run_epoch(session)
-                    moc_te = np.nanmean(te_class_evals)
-                    print te_class_evals[self.sorting]
-                    print('TE (mof/moc): %.2f%%/%.2f%%' % (mof_te,moc_te))
-
-            (_, mof_te), te_class_evals = self.te_model.run_epoch(session)
-            moc_te = np.nanmean(te_class_evals)
-            print(
-                'TRAIN (mof/moc): %.2f%%/%.2f%%, VAL (mof/moc): %.2f%%/%.2f%%, TE (mof/moc): %.2f%%/%.2f%%' % (
-                    np.nanmean(train_evals[:,1]), np.nanmean(train_evals[:,2]),
-                    np.nanmean(val_evals[:,1]), np.nanmean(val_evals[:,2]),
-                    mof_te, moc_te)
-            )
+                if e+1 in set([10, 50, 100, 150, 200, self.num_epochs]):
+                    # Save the model
+                    self.saver.save(
+                        session,
+                        '/data/datasets/breakfast/models/lstmcrf/ckpt',
+                        global_step=e,
+                        write_meta_graph=False)
+                    # Test step
+                    loss_te, mof_te = self.te_model.run_epoch(session, e)
+                    print('[Testing epoch] loss=%.5f, acc=%2.2f%%' % (loss_te, 100.0 * mof_te))

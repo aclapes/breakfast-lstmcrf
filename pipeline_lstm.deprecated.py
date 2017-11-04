@@ -1,12 +1,10 @@
 import numpy as np
 import tensorflow as tf
-
 from progressbar import ProgressBar
-
 from tensorflow.contrib import rnn
 
-from reader import read_data_generator
-from evaluation import compute_framewise_accuracy
+from src.evaluation import compute_framewise_accuracy
+from src.reader import read_data_generator
 
 
 class LstmPipeline(object):

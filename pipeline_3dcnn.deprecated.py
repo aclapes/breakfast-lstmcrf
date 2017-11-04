@@ -1,17 +1,19 @@
-import tensorflow as tf
-import numpy as np
-
-import tensorflow.contrib.slim as slim
-import tensorflow.contrib.slim.nets
-import h5py
 import argparse
 import os
-import c3d_model
 
+import h5py
+import numpy as np
+import tensorflow as tf
 from progressbar import ProgressBar
 
-from reader import read_image_generator
-from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
+from src import c3d_model
+from src.evaluation import compute_accuracy, foo
+from src.preprocessing import compute_class_weights, compute_mean_channels
+from src.reader import read_image_generator
+
+os.environ['CUDA_VISIBLE_DEVICES'] = "3"
+np.set_printoptions(precision=2, linewidth=150)
+MOVING_AVERAGE_DECAY = 0.9999
 
 def average_gradients(tower_grads):
   average_grads = []
@@ -27,10 +29,19 @@ def average_gradients(tower_grads):
     average_grads.append(grad_and_var)
   return average_grads
 
-def tower_loss(name_scope, logit, labels):
-  cross_entropy_mean = tf.reduce_mean(
-                  tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, labels=labels)
-                  )
+def tower_loss(name_scope, logit, labels, class_weights=None):
+
+  if class_weights is None:
+    xent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, labels=labels)
+  else:
+    no_classes = len(class_weights)
+    labels_onehot = tf.one_hot(labels, no_classes, on_value=1.0, off_value=0.0, axis=-1)
+    classweights = tf.expand_dims(tf.constant(class_weights, dtype=tf.float32), axis=0)
+    weight_per_label = tf.transpose(tf.matmul(labels_onehot, tf.transpose(classweights)))
+    xent = tf.multiply(weight_per_label,
+                       tf.nn.softmax_cross_entropy_with_logits(logits=logit, labels=labels_onehot))
+
+  cross_entropy_mean = tf.reduce_mean(xent)
   tf.summary.scalar(
                   name_scope + 'cross entropy',
                   cross_entropy_mean
@@ -52,21 +63,22 @@ def tower_loss(name_scope, logit, labels):
   return total_loss
 
 def tower_acc(logit, labels):
-  correct_pred = tf.equal(tf.argmax(logit, 1), labels)
+  correct_pred = tf.equal(tf.argmax(logit, 1), tf.cast(labels,dtype=tf.int64))
   accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
   return accuracy
 
-def _variable_on_cpu(name, shape, initializer):
+def _variable_on_cpu(name, shape, initializer, trainable=True):
   with tf.device('/cpu:0'):
-    var = tf.get_variable(name, shape, initializer=initializer)
+    var = tf.get_variable(name, shape, initializer=initializer, trainable=trainable)
   return var
 
-def _variable_with_weight_decay(name, shape, wd):
-  var = _variable_on_cpu(name, shape, tf.contrib.layers.xavier_initializer())
+def _variable_with_weight_decay(name, shape, wd, trainable=True):
+  var = _variable_on_cpu(name, shape, tf.contrib.layers.xavier_initializer(), trainable=trainable)
   if wd is not None:
     weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
     tf.add_to_collection('losses', weight_decay)
   return var
+
 
 class SimpleCnnModel(object):
     def __init__(self, config, input_data, is_training):
@@ -82,15 +94,33 @@ class SimpleCnnModel(object):
         decay_rate = config['decay_rate']
         learn_rate = config['learn_rate']
         clip_norm = config['clip_norm']
+        channel_means = config['channel_means']
 
         self.class_weights = config['class_weights']
 
         # Graph construction
+        global_step = tf.get_variable(
+            'global_step',
+            [],
+            initializer=tf.constant_initializer(0),
+            trainable=False
+        )
 
         # Features, output labels, and binary mask of valid timesteps
-        self.x_batch = tf.placeholder(tf.float32, shape=[None,None,224,224,3])
-        self.y_batch = tf.placeholder(tf.int32, shape=[None,None])
+        self.x_batch_placeholder = tf.placeholder(tf.float32,
+                                                  shape=[None,
+                                                         c3d_model.NUM_FRAMES_PER_CLIP,
+                                                         c3d_model.CROP_SIZE,
+                                                         c3d_model.CROP_SIZE,
+                                                         c3d_model.CHANNELS],
+                                                  name='x_batch_placeholder')
+        self.y_batch_placeholder = tf.placeholder(tf.int32,
+                                                  shape=[None, c3d_model.NUM_FRAMES_PER_CLIP],
+                                                  name='y_batch_placeholder')
 
+
+        # self.channels_sum = tf.reduce_sum(tf.cast(x_batch_rs, tf.float32), axis=[0,1,2])
+        self.channel_means_op = tf.reduce_mean(tf.cast(self.x_batch_placeholder, tf.float32), axis=[0, 1, 2, 3])
         # vgg = tf.contrib.slim.nets.vgg
         # VGG_MEAN = [123.68, 116.78, 103.94]
         # with slim.arg_scope(vgg.vgg_arg_scope(weight_decay=1e-5)):
@@ -111,83 +141,107 @@ class SimpleCnnModel(object):
 
         # y_cnn_labels = tf.reshape(self.y_batch, [-1, 16])
 
+        x_normalized = self.x_batch_placeholder - channel_means
+
+        # y_chunked = tf.reshape(y_batch_split[gpu_index], [-1, 16])
+        y_sum = tf.reduce_sum(tf.one_hot(self.y_batch_placeholder, depth=no_classes, dtype=tf.int32), axis=1)
+        self.y = tf.argmax(y_sum, axis=1)
+
+        with tf.control_dependencies([self.y]):
+            self.no_op = tf.no_op()
+
         gpu_num = 1
-        x_batch_split = tf.split(self.x_batch, num_or_size_splits=gpu_num, axis=0)
-        y_batch_split = tf.split(self.y_batch, num_or_size_splits=gpu_num, axis=0)
+        # x_batch_split = tf.split(self.x_batch, num_or_size_splits=gpu_num, axis=0)
+        # y_batch_split = tf.split(self.y_batch, num_or_size_splits=gpu_num, axis=0)
 
         tower_grads1 = []
         tower_grads2 = []
         logits = []
+        losses = []
         opt1 = tf.train.AdamOptimizer(1e-4)
         opt2 = tf.train.AdamOptimizer(2e-4)
-        for gpu_index in range(0, gpu_num):
-            with tf.device('/gpu:%d' % gpu_index):
-                with tf.name_scope('%s_%d' % ('dextro-research', gpu_index)) as scope:
-                    with tf.variable_scope('var_name', reuse=(None if gpu_index == 0 else True)):
-                        weights = {
-                            'wc1': _variable_with_weight_decay('wc1', [3, 3, 3, 3, 64], 0.0005),
-                            'wc2': _variable_with_weight_decay('wc2', [3, 3, 3, 64, 128], 0.0005),
-                            'wc3a': _variable_with_weight_decay('wc3a', [3, 3, 3, 128, 256], 0.0005),
-                            'wc3b': _variable_with_weight_decay('wc3b', [3, 3, 3, 256, 256], 0.0005),
-                            'wc4a': _variable_with_weight_decay('wc4a', [3, 3, 3, 256, 512], 0.0005),
-                            'wc4b': _variable_with_weight_decay('wc4b', [3, 3, 3, 512, 512], 0.0005),
-                            'wc5a': _variable_with_weight_decay('wc5a', [3, 3, 3, 512, 512], 0.0005),
-                            'wc5b': _variable_with_weight_decay('wc5b', [3, 3, 3, 512, 512], 0.0005),
-                            'wd1': _variable_with_weight_decay('wd1', [8192, 4096], 0.0005),
-                            'wd2': _variable_with_weight_decay('wd2', [4096, 4096], 0.0005),
-                            'out': _variable_with_weight_decay('wout', [4096, no_classes], 0.0005)
-                        }
-                        biases = {
-                            'bc1': _variable_with_weight_decay('bc1', [64], 0.000),
-                            'bc2': _variable_with_weight_decay('bc2', [128], 0.000),
-                            'bc3a': _variable_with_weight_decay('bc3a', [256], 0.000),
-                            'bc3b': _variable_with_weight_decay('bc3b', [256], 0.000),
-                            'bc4a': _variable_with_weight_decay('bc4a', [512], 0.000),
-                            'bc4b': _variable_with_weight_decay('bc4b', [512], 0.000),
-                            'bc5a': _variable_with_weight_decay('bc5a', [512], 0.000),
-                            'bc5b': _variable_with_weight_decay('bc5b', [512], 0.000),
-                            'bd1': _variable_with_weight_decay('bd1', [4096], 0.000),
-                            'bd2': _variable_with_weight_decay('bd2', [4096], 0.000),
-                            'out': _variable_with_weight_decay('bout', [no_classes], 0.000),
-                        }
+        # for gpu_index in range(0, gpu_num):
+            # with tf.device('/gpu:%d' % gpu_index):
+        with tf.name_scope('%s_%d' % ('dextro-research', 0)) as scope: #gpu_index)) as scope:
+    #         with tf.variable_scope('var_name', reuse=(None if gpu_index == 0 else True)):
+            weights = {
+                'wc1': _variable_with_weight_decay('wc1', [3, 3, 3, 3, 64], 0.0005, trainable=False),
+                'wc2': _variable_with_weight_decay('wc2', [3, 3, 3, 64, 128], 0.0005, trainable=False),
+                'wc3a': _variable_with_weight_decay('wc3a', [3, 3, 3, 128, 256], 0.0005, trainable=False),
+                'wc3b': _variable_with_weight_decay('wc3b', [3, 3, 3, 256, 256], 0.0005, trainable=False),
+                'wc4a': _variable_with_weight_decay('wc4a', [3, 3, 3, 256, 512], 0.0005, trainable=False),
+                'wc4b': _variable_with_weight_decay('wc4b', [3, 3, 3, 512, 512], 0.0005, trainable=False),
+                'wc5a': _variable_with_weight_decay('wc5a', [3, 3, 3, 512, 512], 0.0005, trainable=False),
+                'wc5b': _variable_with_weight_decay('wc5b', [3, 3, 3, 512, 512], 0.0005, trainable=False),
+                'wd1': _variable_with_weight_decay('wd1', [8192, 4096], 0.0005),
+                'wd2': _variable_with_weight_decay('wd2', [4096, 4096], 0.0005),
+                'out': _variable_with_weight_decay('wout', [4096, no_classes], 0.0005)
+            }
+            biases = {
+                'bc1': _variable_with_weight_decay('bc1', [64], 0.000, trainable=False),
+                'bc2': _variable_with_weight_decay('bc2', [128], 0.000, trainable=False),
+                'bc3a': _variable_with_weight_decay('bc3a', [256], 0.000, trainable=False),
+                'bc3b': _variable_with_weight_decay('bc3b', [256], 0.000, trainable=False),
+                'bc4a': _variable_with_weight_decay('bc4a', [512], 0.000, trainable=False),
+                'bc4b': _variable_with_weight_decay('bc4b', [512], 0.000, trainable=False),
+                'bc5a': _variable_with_weight_decay('bc5a', [512], 0.000, trainable=False),
+                'bc5b': _variable_with_weight_decay('bc5b', [512], 0.000, trainable=False),
+                'bd1': _variable_with_weight_decay('bd1', [4096], 0.000),
+                'bd2': _variable_with_weight_decay('bd2', [4096], 0.000),
+                'out': _variable_with_weight_decay('bout', [no_classes], 0.000),
+            }
 
-                        x = tf.reshape(x_batch_split[gpu_index], [-1, 16, 224, 224, 3])
-                        varlist1 = weights.values()
-                        varlist2 = biases.values()
-                        logit = c3d_model.inference_c3d(
-                            x,
-                            0.5,
-                            tf.shape(x)[0],
-                            weights,
-                            biases
-                        )
-                        y_chunked = tf.reshape(y_batch_split[gpu_index], [-1, 16])
-                        y_sum = tf.reduce_sum(tf.one_hot(y_chunked, depth=no_classes, dtype=tf.int32), axis=1)
-                        y = tf.argmax(y_sum, axis=1)
-                        loss = tower_loss(
-                            scope,
-                            logit,
-                            y
-                        )
-                        grads1 = opt1.compute_gradients(loss, varlist1)
-                        grads2 = opt2.compute_gradients(loss, varlist2)
-                        tower_grads1.append(grads1)
-                        tower_grads2.append(grads2)
-                        logits.append(logit)
+            # x = tf.reshape(x_batch_split[gpu_index], [-1, 16, 224, 224, 3])
+
+            varlist1 = weights.values()
+            varlist2 = biases.values()
+            logit = c3d_model.inference_c3d(
+                x_normalized,
+                0.5,
+                tf.shape(x_normalized)[0],
+                weights,
+                biases
+            )
+
+            loss = tower_loss(
+                scope,
+                logit,
+                self.y,
+                class_weights=config['class_weights']
+            )
+
+            grads1 = opt1.compute_gradients(loss, varlist1)
+            grads2 = opt2.compute_gradients(loss, varlist2)
+            tower_grads1.append(grads1)
+            tower_grads2.append(grads2)
+            logits.append(logit)
+            losses.append(loss)
                         # tf.get_variable_scope().reuse_variables()
-        logits = tf.concat(logits, 0)
-        # accuracy = tower_acc(logits, labels_placeholder)
-        # preds = tf.argmax(logit, 1)
-        # tf.summary.scalar('accuracy', accuracy)
-        # grads1 = average_gradients(tower_grads1)
-        # grads2 = average_gradients(tower_grads2)
-        # apply_gradient_op1 = opt1.apply_gradients(grads1)
-        # apply_gradient_op2 = opt2.apply_gradients(grads2, global_step=global_step)
-        # variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY)
-        # variables_averages_op = variable_averages.apply(tf.trainable_variables())
-        # train_op = tf.group(apply_gradient_op1, apply_gradient_op2, variables_averages_op)
+        concat_logits_op = tf.concat(logits, 0)
+        self.loss = tf.reduce_mean(losses)
+        # self.noop = tf.no_op()
+        self.tower_accuracy = tower_acc(concat_logits_op, self.y)
+        self.preds = tf.argmax(logit, 1)
+        tf.summary.scalar('accuracy', self.tower_accuracy)
+        grads1 = average_gradients(tower_grads1)
+        grads2 = average_gradients(tower_grads2)
+        apply_gradient_op1 = opt1.apply_gradients(grads1)
+        apply_gradient_op2 = opt2.apply_gradients(grads2, global_step=global_step)
+        variable_averages = tf.train.ExponentialMovingAverage(MOVING_AVERAGE_DECAY)
+        variables_averages_op = variable_averages.apply(tf.trainable_variables())
+        self.train_op = tf.group(apply_gradient_op1, apply_gradient_op2, variables_averages_op)
 
+        saved_variables = []
+        variables = weights.values() + biases.values()
+        for v in variables:
+            var_name = v.name.split(':')[0]
+            if var_name != 'Model/wout' and var_name != 'Model/bout':
+                saved_variables.append(v)
 
+        self.saver = tf.train.Saver(saved_variables)
+
+        # variables_to_restore = tf.contrib.framework.get_variables_to_restore(exclude=['Model/wout', 'Model/bout'])
+        # self.init_rest = tf.contrib.framework.assign_from_checkpoint_fn('my-new-model', variables_to_restore)
 
         # x_batch = tf.nn.l2_normalize(self.x_batch, dim=2)
         # if is_training:
@@ -259,6 +313,8 @@ class SimpleCnnModel(object):
         :param train_op:
         :return:
         '''
+        # run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        # run_metadata = tf.RunMetadata()
 
         self.reader = read_image_generator(self.input_data['video_features'],
                                           self.input_data['outputs'],
@@ -277,22 +333,32 @@ class SimpleCnnModel(object):
             batch = self.reader.next()
 
             fetches = {
-                'loss' : self.loss,
-                # 'decoding' : self.decoding
+                'loss': self.loss,
+                'acc' : self.tower_accuracy,
+                'predictions' : self.preds,
+                'trues' : self.y
             }
             if self.is_training:
                 fetches['train_op'] = self.train_op
 
             vals = session.run(
                 fetches,
-                feed_dict={self.x_batch: batch[0], self.y_batch: batch[1]}
+                feed_dict={self.x_batch_placeholder: batch[0], self.y_batch_placeholder: batch[1]},
             )
-            print vals['loss']
-            # batch_loss[b] = vals['loss']
-            # batch_accs[b] = compute_framewise_accuracy(vals['predictions'], batch[1])
-            # hits, trues = compute_classwise_accuracy(vals['predictions'], batch[1], self.class_weights)
-            # hit_classes += hits
-            # true_classes += trues
+
+            # vals = session.run(
+            #     [self.no_op], #[self.train_op, self.tower_accuracy], # [self.x_batch, self.y_batch],
+            #     feed_dict={self.x_batch: batch[0], self.y_batch: batch[1]},
+            # )
+
+            # print vals['loss']
+            batch_loss[b] = vals['loss']
+            acc = compute_accuracy(vals['predictions'], vals['trues'])
+            print ' -> ' + str(vals['loss']) + ', ' + str(acc)
+            batch_accs[b] = acc
+            hits, trues = foo(vals['predictions'], vals['trues'], self.class_weights)
+            hit_classes += hits
+            true_classes += trues
             # if num_batches < num_instances:
             #     print 100.* (hits/trues)
 
@@ -307,8 +373,9 @@ class SimpleCnnPipeline(object):
                  train,
                  val,
                  te,
+                 channel_means_file,
                  no_classes,
-                 class_weights,
+                 class_weights_file,
                  batch_size,
                  learn_rate,
                  decay_rate,
@@ -318,6 +385,7 @@ class SimpleCnnPipeline(object):
                  clip_norm=1.0):
 
         self.num_epochs = num_epochs
+        self.channel_means_file = channel_means_file
 
         config = dict(
             no_classes = no_classes,
@@ -329,13 +397,28 @@ class SimpleCnnPipeline(object):
             decay_rate = decay_rate,
             learn_rate = learn_rate,
             clip_norm = clip_norm,
-            class_weights = class_weights
+            channel_means_file = channel_means_file
         )
 
+        try:
+            class_weights = np.load(class_weights_file)
+        except IOError, e:
+            class_weights = compute_class_weights(train, config['batch_size'])
+            np.save(class_weights_file, class_weights)
+
+        config['class_weights'] = class_weights
         self.sorting = np.argsort(class_weights)  # using class weight criterion
 
+        try:
+            channel_means = np.load(self.channel_means_file)
+        except IOError, e:
+            channel_means = compute_mean_channels(train, config['batch_size'])
+            np.save(self.channel_means_file, channel_means)
+
+        config['channel_means'] = channel_means
+
         test_config = config.copy()
-        test_config['batch_size'] = 1
+        test_config['batch_size'] = c3d_model.NUM_FRAMES_PER_CLIP
 
         self.graph = tf.Graph()
         with self.graph.as_default():
@@ -351,12 +434,26 @@ class SimpleCnnPipeline(object):
 
             self.init_op = tf.global_variables_initializer()
 
-
     def run(self, gpu_options):
-        np.set_printoptions(precision=2,linewidth=150)
+        # with tf.Graph().as_default(), tf.Session().as_default() as session:
+            # ckpt_reader = tf.train.NewCheckpointReader(
+            #     '/data/datasets/UCF-101/sports1m_finetuning_ucf101.model')  # .restore(session, '/data/datasets/UCF-101/sports1m_finetuning_ucf101.model')
+            #
+            # new_vars = []
+            # for name in ckpt_reader.get_variable_to_shape_map():
+            #     if name != 'var_name/wout' and name != 'var_name/wout':
+            #         new_vars.append(tf.Variable(ckpt_reader.get_tensor(name), name=name.replace('var_name', 'Model')))
+            #
+            # saver = tf.train.Saver(new_vars)
+            # session.run(tf.global_variables_initializer())
+            # saver.save(session, 'my-new-model')
+
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
             session.run(self.init_op)
-            # session.run([self.init_fn,self.fc8_init])
+            if True:
+                # ckpt_reader = tf.train.NewCheckpointReader('my-new-model')
+                self.train_model.saver.restore(session, 'my-new-model')
+                # session.run(self.train_model.init_rest)
 
             train_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
             val_evals = np.zeros((self.num_epochs,3), dtype=np.float32)
@@ -422,11 +519,29 @@ if __name__ == '__main__':
         'Dataset in hdf5 format (default: %(default)s)')
 
     parser.add_argument(
+        '-m',
+        '--channel-means-file',
+        type=str,
+        dest='channel_means_file',
+        default='./breakfast/channel_means.npy',
+        help=
+        'File (npy) containing a 3-valued vector (default: %(default)s)')
+
+    parser.add_argument(
+        '-w',
+        '--class-weights-file',
+        type=str,
+        dest='class_weights_file',
+        default='./breakfast/class_weights.npy',
+        help=
+        'File (npy) containing a N-sized vector, where N number of classes (default: %(default)s)')
+
+    parser.add_argument(
         '-b',
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=4,
+        default=1,
         help=
         'Batch size (default: %(default)s)')
 
@@ -435,7 +550,7 @@ if __name__ == '__main__':
         '--learning-rate',
         type=float,
         dest='learn_rate',
-        default=1e-2,
+        default=1e-4,
         help=
         'Starting learning rate. It decays after 100 and 1000 epochs by a factor specified by --decay-rate argument (default: %(default)s)')
 
@@ -489,7 +604,7 @@ if __name__ == '__main__':
         '--gpu-memory',
         type=float,
         dest='gpu_memory',
-        default=0.9,
+        default=0.95,
         help=
         'GPU memory to reserve (default: %(default)s)')
 
@@ -501,13 +616,23 @@ if __name__ == '__main__':
     f_validation = h5py.File(os.path.join(args.input_dir, 'validation.h5'), 'r')
     f_testing = h5py.File(os.path.join(args.input_dir, 'testing.h5'), 'r')
 
+    # st_time = time.time()
+    # if not os.path.exists(os.path.join(args.input_dir, 'mean_channels.npy')):
+    #     total_sum = np.zeros((f_training['video_features'].shape[-1]), dtype=np.float64)
+    #     progress
+    #     for i in range(f_training['video_features'].shape[0]):
+    #         im = f_training['video_features'][i]
+    #         total_sum += np.mean(np.mean(im, axis=1), axis=0)
+    # print time.time() - st_time
+
     # Create a model (choosen via argument passing)
     m = SimpleCnnPipeline(
         f_training,
         f_validation,
         f_testing,
+        args.channel_means_file,
         len(f_training['class_weights']),
-        f_training['class_weights'][:],
+        args.class_weights_file,
         batch_size=args.batch_size,
         learn_rate=args.learn_rate,
         decay_rate=args.decay_rate,

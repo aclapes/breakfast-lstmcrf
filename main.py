@@ -7,6 +7,8 @@ from pipeline_lstm_ttbp import LstmPipeline
 from pipeline_crf import SimpleCrfPipeline
 from pipeline_lstmcrf import SimpleLstmcrfPipeline
 
+import os
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
 
@@ -15,19 +17,28 @@ if __name__ == '__main__':
     # -----------------------------------------------
     parser.add_argument(
         '-i',
-        '--input-file',
+        '--input-dir',
         type=str,
-        dest='input_file',
-        default='/breakfast/breakfast.h5',
+        dest='input_dir',
+        default='/data/datasets/breakfast/hdf5/pooled-20-0.5b/',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
+
+    parser.add_argument(
+        '-w',
+        '--class-weights-file',
+        type=str,
+        dest='class_weights_file',
+        default='./breakfast/class_weights.npy',
+        help=
+        'File (npy) containing a N-sized vector, where N number of classes (default: %(default)s)')
 
     parser.add_argument(
         '-b',
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=48,
+        default=64,
         help=
         'Batch size (default: %(default)s)')
 
@@ -36,7 +47,7 @@ if __name__ == '__main__':
         '--learning-rate',
         type=float,
         dest='learn_rate',
-        default=1e-2,
+        default=1e-3,
         help=
         'Starting learning rate. It decays after 100 and 1000 epochs by a factor specified by --decay-rate argument (default: %(default)s)')
 
@@ -45,7 +56,7 @@ if __name__ == '__main__':
         '--decay-rate',
         type=float,
         dest='decay_rate',
-        default=10,
+        default=2,
         help=
         'Decay rate for inverse time decay (default: %(default)s)')
 
@@ -54,7 +65,7 @@ if __name__ == '__main__':
         '--num_epochs',
         type=int,
         dest='num_epochs',
-        default=2000,
+        default=200,
         help=
         'Num epochs (default: %(default)s)')
 
@@ -77,6 +88,15 @@ if __name__ == '__main__':
         'Clipping gradients by norm above clip_norm (default: %(default)s)')
 
     parser.add_argument(
+        '-T',
+        '--test-subset',
+        type=str,
+        dest='test_subset',
+        default='s1',
+        help=
+        'Test data subset identifier (default: %(default)s)')
+
+    parser.add_argument(
         '-M',
         '--model-type',
         type=str,
@@ -93,7 +113,7 @@ if __name__ == '__main__':
         '--hidden-size',
         type=int,
         dest='hidden_size',
-        default=1024,
+        default=512,
         help=
         'Hidden size (default: %(default)s)')
 
@@ -102,7 +122,7 @@ if __name__ == '__main__':
         '--drop-prob',
         type=float,
         dest='drop_prob',
-        default=0.1,
+        default=0.2,
         help=
         'Dropout probability (default: %(default)s)')
     # -----------------------------------------------
@@ -111,27 +131,45 @@ if __name__ == '__main__':
         '--gpu-memory',
         type=float,
         dest='gpu_memory',
-        default=0.9,
+        default=0.95,
         help=
         'GPU memory to reserve (default: %(default)s)')
+
+    parser.add_argument(
+        '-D',
+        '--cuda-devices',
+        type=str,
+        dest='cuda_devices',
+        default="3",
+        help=
+        'GPU devices (default: %(default)s)')
 
     args = parser.parse_args()
     print args
 
     # Read breakfast from hdf5 file
-    f_dataset = h5py.File(args.input_file, 'r')
-    print('Dataset (%s) attributes:' % (args.input_file))
-    for key in f_dataset.attrs.keys():
-        print('%s : %s' % (key, str(f_dataset.attrs[key])))
+    f_dataset = h5py.File(os.path.join(args.input_dir, 'dataset.h5'), 'r')
+
+    # f_training = h5py.File(os.path.join(args.input_dir, 'training.h5'), 'r')
+    # f_validation = h5py.File(os.path.join(args.input_dir, 'testing.h5'), 'r')
+    # f_testing = h5py.File(os.path.join(args.input_dir, 'testing.h5'), 'r')
+
+
+    # # Read breakfast from hdf5 file
+    # f_dataset = h5py.File(args.input_file, 'r')
+    # print('Dataset (%s) attributes:' % (args.input_file))
+    # for key in f_dataset.attrs.keys():
+    #     print('%s : %s' % (key, str(f_dataset.attrs[key])))
+
+    if args.cuda_devices:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.cuda_devices
 
     # Create a model (choosen via argument passing)
     if args.model_type == 'lstmcrf':
         m = SimpleLstmcrfPipeline(
-            f_dataset['training'],
-            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
-            f_dataset['testing'],
-            f_dataset.attrs['no_classes'],
-            f_dataset['training']['class_weights'][:],
+            f_dataset,
+            args.test_subset,
+            args.class_weights_file,
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,
@@ -141,69 +179,53 @@ if __name__ == '__main__':
             optimizer_type=args.optimizer_type,
             clip_norm=args.clip_norm
         )
-    elif args.model_type == 'lstm':
-        # m = SimpleLstmPipeline(
-        #     f_dataset['training'],
-        #     f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
-        #     f_dataset['testing'],
-        #     f_dataset.attrs['no_classes'],
-        #     f_dataset['training']['class_weights'][:],
-        #     batch_size=args.batch_size,
-        #     learn_rate=args.learn_rate,
-        #     decay_rate=args.decay_rate,
-        #     num_epochs=args.num_epochs,
-        #     hidden_size=args.hidden_size,
-        #     drop_prob=args.drop_prob,
-        #     optimizer_type=args.optimizer_type,
-        #     clip_norm=args.clip_norm
-        # )
-        m = SimpleLstmPipeline(
-            f_dataset['training'],
-            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
-            f_dataset['testing'],
-            f_dataset.attrs['no_classes'],
-            f_dataset['training']['class_weights'][:],
-            batch_size=args.batch_size,
-            learn_rate=args.learn_rate,
-            decay_rate=args.decay_rate,
-            num_epochs=args.num_epochs,
-            hidden_size=args.hidden_size,
-            drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type,
-            clip_norm=args.clip_norm
-        )
-        elif args.model_type == 'crf':
-        m = SimpleCrfPipeline(
-            f_dataset['training'],
-            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
-            f_dataset['testing'],
-            f_dataset.attrs['no_classes'],
-            f_dataset['training']['class_weights'][:],
-            batch_size=args.batch_size,
-            learn_rate=args.learn_rate,
-            decay_rate=args.decay_rate,
-            num_epochs=args.num_epochs,
-            hidden_size=args.hidden_size,
-            drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type,
-            clip_norm=args.clip_norm
-        )
-    elif args.model_type == 'cnncrf':
-        m = SimpleCnnCrfPipeline(
-            f_dataset['training'],
-            f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
-            f_dataset['testing'],
-            f_dataset.attrs['no_classes'],
-            f_dataset['training']['class_weights'][:],
-            batch_size=args.batch_size,
-            learn_rate=args.learn_rate,
-            decay_rate=args.decay_rate,
-            num_epochs=args.num_epochs,
-            hidden_size=args.hidden_size,
-            drop_prob=args.drop_prob,
-            optimizer_type=args.optimizer_type,
-            clip_norm=args.clip_norm
-        )
+    # elif args.model_type == 'lstm':
+    #     m = SimpleLstmPipeline(
+    #         f_training,
+    #         f_testing,
+    #         f_testing,
+    #         args.class_weights_file,
+    #         batch_size=args.batch_size,
+    #         learn_rate=args.learn_rate,
+    #         decay_rate=args.decay_rate,
+    #         num_epochs=args.num_epochs,
+    #         hidden_size=args.hidden_size,
+    #         drop_prob=args.drop_prob,
+    #         optimizer_type=args.optimizer_type,
+    #         clip_norm=args.clip_norm
+    #     )
+    # elif args.model_type == 'crf':
+    #     m = SimpleCrfPipeline(
+    #         f_dataset['training'],
+    #         f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
+    #         f_dataset['testing'],
+    #         f_dataset.attrs['no_classes'],
+    #         f_dataset['training']['class_weights'][:],
+    #         batch_size=args.batch_size,
+    #         learn_rate=args.learn_rate,
+    #         decay_rate=args.decay_rate,
+    #         num_epochs=args.num_epochs,
+    #         hidden_size=args.hidden_size,
+    #         drop_prob=args.drop_prob,
+    #         optimizer_type=args.optimizer_type,
+    #         clip_norm=args.clip_norm
+    #     )
+    # elif args.model_type == 'cnncrf':
+    #     m = SimpleCnnCrfPipeline(
+    #         f_dataset['training'],
+    #         f_dataset['validation'] if 'validation' in f_dataset else f_dataset['testing'],
+    #         f_dataset['testing'],
+    #         f_dataset.attrs['no_classes'],
+    #         f_dataset['training']['class_weights'][:],
+    #         batch_size=args.batch_size,
+    #         learn_rate=args.learn_rate,
+    #         decay_rate=args.decay_rate,
+    #         num_epochs=args.num_epochs,
+    #         hidden_size=args.hidden_size,
+    #         drop_prob=args.drop_prob,
+    #         optimizer_type=args.optimizer_type,
+    #         clip_norm=args.clip_norm
+    #     )
     else:
         raise NotImplementedError('Please specify a valid model (-M <model_type>).')
 
@@ -214,4 +236,6 @@ if __name__ == '__main__':
     m.run(gpu_options)
     # -----------------------------------------------
 
-    f_dataset.close()
+    # f_training.close()
+    # f_validation.close()
+    # f_testing.close()

@@ -1,14 +1,12 @@
 import numpy as np
 import tensorflow as tf
-
 from progressbar import ProgressBar
-
 from tensorflow.contrib import rnn
 
-from reader import read_data_generator
-from evaluation import compute_framewise_accuracy, compute_classwise_accuracy
-
 from src.dropout import variational_dropout
+from src.evaluation import compute_framewise_accuracy, compute_classwise_accuracy
+from src.reader import read_data_generator
+
 
 class LstmModel(object):
     def __init__(self, config, input_data, is_training):

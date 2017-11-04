@@ -18,7 +18,8 @@ def import_labels(f):
         i += 1
     return labels
 
-def read_features(filepath, pool_op, win_size=20, overlap=.5):
+
+def read_features(filepath, pool_op, win_size=20, overlap=0.5):
     import csv
     with open(filepath, 'r') as csvfile:
         reader = csv.reader(csvfile, delimiter='\t')
@@ -36,18 +37,8 @@ def read_features(filepath, pool_op, win_size=20, overlap=.5):
             X_max = np.max(X[st:st+win_size], axis=0)
             Xp = np.where(-X_min > X_max, X_min, X_max)
 
-    # This was faster (now it is deprecated)
-    # st_time = time.time()
-    # X = X[:(X.shape[0] // win_size) * win_size, :]
-    # if pool_op == 'avg':  # average pooling
-    #     Xp = np.mean(X.reshape(X.shape[0] // win_size, win_size, X.shape[1]), axis=1)
-    # elif pool_op == 'max':  # max pooling
-    #     X_r = X.reshape(X.shape[0] // win_size, win_size, X.shape[1])
-    #     X_min, X_max = X_r.min(axis=1), X_r.max(axis=1)
-    #     Xp = np.where(-X_min > X_max, X_min, X_max)
-    # print time.time() - st_time
-
     return Xp
+
 
 def generate_output(video_info, labels, win_size=20, overlap=.5):
     ''' Given the info of the vide, generate a vector of classes corresponding
@@ -88,115 +79,109 @@ def create(features_path, pool_op, pool_win_size, pool_win_ovl, pad_to_mul_of, i
         videos_data = json.load(f)
         # uncomment if want to merge validation and training
         # ---
-        # for key, value in videos_data.iteritems():
-        #     if videos_data[key]['subset'] == 'validation':
-        #         videos_data[key]['subset'] = 'training'
+        for key, value in videos_data.iteritems():
+            if videos_data[key]['subset'] == 'validation':
+                videos_data[key]['subset'] = 'training'
         # ---
 
     with open(labels_file, 'r') as f:
         labels = import_labels(f)
 
+    dataset = dict()
+    subsets = ['training', 'testing']
+
     class_counts = np.zeros((len(labels),), dtype=np.float32)
 
-    videos = np.sort([key for key in videos_data.keys()])
-    nb_videos = len(videos)
+    for subset in subsets:
+        videos = [
+            key for key in videos_data.keys() if videos_data[key]['subset'] == subset
+        ]
 
-    print('Number of videos: {}'.format(nb_videos))
+        nb_videos = len(videos)
 
-    # dataset = dict(
-    #     video_features = {},
-    #     outputs = {},
-    #     lengths = {}
-    # )
+        print('Number of videos for {} subset: {}'.format(subset, nb_videos))
 
-    try:
-        os.makedirs(output_dir)
-    except OSError, e:
-        pass
-    output_file = os.path.join(output_dir, 'dataset.h5')
-    f_dataset = h5py.File(output_file, 'w')
-
-    vid_fmt = h5py.special_dtype(vlen=np.dtype('float32'))
-    lbl_fmt = h5py.special_dtype(vlen=np.dtype('int32'))
-    dt = np.dtype({'names': ['video_features', 'outputs'], 'formats': [vid_fmt, lbl_fmt]})
-
-    f_dataset.create_dataset(
-        'dataset', (nb_videos,),
-        dtype=dt
-    )
-
-    f_dataset.create_dataset(
-        'subsets', (nb_videos,),
-        dtype=h5py.special_dtype(vlen=str)
-    )
-
-    f_dataset.create_dataset(
-        'lengths', (nb_videos,),
-        dtype='<i4'
-    )
-
-    for i,key in enumerate(videos):
-        print('Reading %d/%d from disk...' % (i,nb_videos-1))
-
-        filepath = os.path.join(features_path + key.split('_')[-1], key + '.txt')
-        x = read_features(filepath, pool_op, win_size=pool_win_size, overlap=pool_win_ovl)
-        y = generate_output(videos_data[key], labels, win_size=pool_win_size, overlap=pool_win_ovl)
-
-        ids, counts = np.unique(y, return_counts=True)
-        for id,c in zip(ids,counts): class_counts[id] += c
-
-        video_features = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
-        assert video_features.shape[0] == len(y)
-        f_dataset['dataset'][i] = (
-            video_features.flatten(), np.array(y)
+        dataset[subset] = dict(
+            video_features = {},
+            outputs = {},
+            lengths = {}
         )
-        f_dataset['subsets'][i] = videos_data[key]['subset']
-        f_dataset['lengths'][i] = len(y)
 
-    # num_features = dataset['video_features'][videos[0]].shape[1]
+        for i,key in enumerate(videos):
+            print('Reading %d/%d from disk...' % (i,nb_videos-1))
 
+            filepath = os.path.join(features_path + key.split('_')[-1], key + '.txt')
+            x = read_features(filepath, pool_op, win_size=pool_win_size, overlap=pool_win_ovl)
+            y = generate_output(videos_data[key], labels, win_size=pool_win_size, overlap=pool_win_ovl)
 
+            if subset == 'training':  # count to assign class weights later
+                ids, counts = np.unique(y, return_counts=True)
+                for id,c in zip(ids,counts): class_counts[id] += c
 
-    # video_features = np.zeros((len(videos), max_len, num_features), dtype=np.float32)
-    # outputs = np.zeros((len(videos), max_len), dtype=np.float32)
-    # lengths = np.zeros((len(videos), 1), dtype=np.int32)
-    # for i, key in enumerate(videos):
-    #     f_dataset[i] = (dataset['video_features'][key], dataset['outputs'][key], leng)
-        # leng = dataset['lengths'][key]
-        # video_features[i,:leng,:] = dataset['video_features'][key]
-        # outputs[i,:leng] = dataset['outputs'][key]
-        # lengths[i,0] = leng
+            dataset[subset]['video_features'][key] = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
+            dataset[subset]['outputs'][key] = y
+            dataset[subset]['lengths'][key] = len(dataset[subset]['outputs'][key])
+            assert dataset[subset]['video_features'][key].shape[0] == len(dataset[subset]['outputs'][key])
 
+    max_len = np.max([np.max(dataset[subset]['lengths'].values()) for subset in subsets])
+    max_len = ((max_len // pad_to_mul_of) + 1) * pad_to_mul_of
 
-    # f_dataset.create_dataset(
-    #     'outputs',
-    #     data=outputs[perm,:],
-    #     chunks=(10, outputs.shape[1]),
-    #     dtype='float32')
-    # f_dataset.create_dataset(
-    #     'lengths',
-    #     data=lengths[perm],
-    #     chunks=(10,1),
-    #     dtype='int32')
+    for subset in subsets:
+        print('Creating HDF file for %s...' % (subset))
+        videos = [
+            key for key in videos_data.keys() if videos_data[key]['subset'] == subset
+        ]
 
-    f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
+        num_features = dataset[subset]['video_features'][videos[0]].shape[1]
 
-    # Save some additional attributes
-    f_dataset.attrs['num_features'] = 64
-    f_dataset.attrs['max_length'] = 1000
-    f_dataset.attrs['num_classes'] = len(labels)
-    f_dataset.attrs['pool_op'] = pool_op
-    f_dataset.attrs['pool_win_size'] = pool_win_size
-    f_dataset.attrs['pool_win_ovl'] = pool_win_ovl
-    f_dataset.attrs['pad_to_mul_of'] = pad_to_mul_of
+        video_features = np.zeros((len(videos), max_len, num_features), dtype=np.float32)
+        outputs = np.zeros((len(videos), max_len), dtype=np.float32)
+        lengths = np.zeros((len(videos), 1), dtype=np.int32)
+        for i, key in enumerate(videos):
+            leng = dataset[subset]['lengths'][key]
+            video_features[i,:leng,:] = dataset[subset]['video_features'][key]
+            outputs[i,:leng] = dataset[subset]['outputs'][key]
+            lengths[i,0] = leng
 
-    f_dataset.close()
+        perm = np.random.RandomState(42).permutation(len(videos))
 
-    # Sanity check
-    f_dataset = h5py.File(output_file, 'r')
-    # f_dataset.attrs['class_weights']
-    assert f_dataset.attrs['num_classes'] == len(labels)
-    f_dataset.close()
+        try:
+            os.makedirs(output_dir)
+        except OSError, e:
+            pass
+        output_file = os.path.join(output_dir, subset + '.h5')
+        f_dataset = h5py.File(output_file, 'w')
+
+        f_dataset.create_dataset(
+            'video_features',
+            data=video_features[perm,:,:],
+            chunks=(1, video_features.shape[1], video_features.shape[2]),
+            dtype='float32')
+        f_dataset.create_dataset(
+            'outputs',
+            data=outputs[perm,:],
+            dtype='float32')
+        f_dataset.create_dataset(
+            'lengths',
+            data=lengths[perm],
+            dtype='int32')
+
+        f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
+
+        # Save some additional attributes
+        f_dataset.attrs['no_classes'] = len(labels)
+        f_dataset.attrs['pool_op'] = pool_op
+        f_dataset.attrs['pool_win_size'] = pool_win_size
+        f_dataset.attrs['pool_win_ovl'] = pool_win_ovl
+        f_dataset.attrs['pad_to_mul_of'] = pad_to_mul_of
+
+        f_dataset.close()
+
+        # Sanity check
+        f_dataset = h5py.File(output_file, 'r')
+        # f_dataset.attrs['class_weights']
+        assert f_dataset.attrs['no_classes'] == len(labels)
+        f_dataset.close()
 
 
 if __name__ == '__main__':
@@ -270,7 +255,7 @@ if __name__ == '__main__':
         '--output-dir',
         type=str,
         dest='output_dir',
-        default='./breakfast/dataset/pooled-20-0.5b/',
+        default='./breakfast/dataset/pooled-20-0.5/',
         help=
         'Directory where hdf5 files will be generated (default: %(default)s)')
 

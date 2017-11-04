@@ -32,7 +32,7 @@ RUN pip install --upgrade \
     progressbar2==3.9.3 \
     Theano==0.8.2 \
     youtube-dl \
-    tensorflow-gpu==1.3 \
+    tensorflow-gpu==1.4.0 \
     git+https://github.com/albertomontesg/keras.git@improved-3d-ops
 
 RUN echo "[global]\ndevice=gpu\nfloatX=float32\noptimizer_including=cudnn\n\n[lib]\ncnmem=1\n\n[dnn]\nenabled=True" > .theanorc
@@ -82,6 +82,7 @@ RUN chown dockeruser:dockeruser -R /home/dockeruser/src
 # Open port 22 to map with some host's port
 EXPOSE 22
 RUN mkdir /var/run/sshd
+EXPOSE 6006
 
 RUN sh -c 'ln -s /dev/null /dev/raw1394'
 
