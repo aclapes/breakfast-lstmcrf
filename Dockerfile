@@ -77,7 +77,7 @@ RUN useradd -ms /bin/bash dockeruser && \
 #	git clone https://github.com/aclapes/breakfast-lstmcrf.git && \
 #	chown dockeruser:dockeruser -R /home/dockeruser/src
 COPY . /home/dockeruser/src
-RUN chown dockeruser:dockeruser -R /home/dockeruser/src
+RUN mkdir /home/dockeruser/log && chown dockeruser:dockeruser -R /home/dockeruser/
 
 # Open port 22 to map with some host's port
 EXPOSE 22
