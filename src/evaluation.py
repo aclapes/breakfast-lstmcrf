@@ -30,6 +30,18 @@ def compute_accuracy(predictions, labels):
 
     return 100. * correct_labels / float(total_labels)
 
+def compute_accuracy(predictions, labels):
+    '''
+    :param predictions: 1-D array of predictions [batch_size]
+    :param labels: 1-D array of labels [batch_size]
+    :return:
+    '''
+
+    correct_labels = np.sum(np.equal(predictions, labels))
+    total_labels = len(predictions)
+
+    return 100. * correct_labels / float(total_labels)
+
 
 def compute_classwise_accuracy(predictions, labels, lengths, class_weights):
     '''

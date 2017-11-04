@@ -38,7 +38,6 @@ def preprocessing(images, labels):
 
     return images, labels
 
-
 class Simple2DCnnModel(object):
     def __init__(self, config, input_data, is_training, pretrain_weights=None):
         self.config = config
@@ -83,13 +82,13 @@ class Simple2DCnnModel(object):
             )
 
             self.iterator = ds.make_initializable_iterator()
+
             x_batch, y_batch = self.iterator.get_next()
 
 
         # # Features, output labels, and binary mask of valid timesteps
         # self.x_batch = tf.placeholder(tf.float32, shape=[None] + list(frame_dims))
         # self.y_batch = tf.placeholder(tf.int32, shape=[None])
-
         self.learning_rate = tf.placeholder(tf.float32, shape=[])
 
         # # Using tftables
@@ -322,7 +321,6 @@ class Simple2DCnnPipeline(object):
         test_config['num_instances'] = test['/dataset'].shape[0]
         test_config['batch_size'] = 1
 
-
         # load pre-trained weights and remove output layer (which has de #classes from ImageNet)
         pretrain_weights = np.load('/data/datasets/vgg19.npy', encoding='latin1').item()
         if 'fc8' in pretrain_weights:
@@ -349,7 +347,6 @@ class Simple2DCnnPipeline(object):
             #     self.te_model = Simple2DCnnModel(config=test_config, input_data=te, is_training=False, pretrain_weights=pretrain_weights)
 
             self.init_op = tf.global_variables_initializer()
-
 
     def _run(self, session, num_epochs, tvar_names):
         """

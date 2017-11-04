@@ -310,6 +310,7 @@ class SimpleLstmcrfPipeline(object):
 
         config['class_weights'] = class_weights
         config['num_classes'] = len(class_weights)
+
         self.sorting = np.argsort(class_weights)  # using class weight criterion
 
         val_config = config.copy()

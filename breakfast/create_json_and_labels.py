@@ -21,6 +21,8 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
     action_labels = dict()  # several actions in each video
     action_durations = dict()
 
+    action_durations = dict()
+
     video_labels = np.sort(os.listdir(path_segmentation))  # video labels correspond to activities, not actions
     for i, video_label in enumerate(video_labels):
         segm_files = os.listdir(os.path.join(path_segmentation, video_label))

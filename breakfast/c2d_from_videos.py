@@ -201,7 +201,6 @@ def create(info_file, labels_file, frame_size, action_labels, output_dir, fskip=
             # ptr += len(perm_vid_sb)
 
 
-
             nr_samples_per_vid = int(videos_data[key]['num_frames']//fskip)
             for j in range(nr_samples_per_vid):
                 im = X[j*fskip]
