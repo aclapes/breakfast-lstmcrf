@@ -24,22 +24,13 @@ if __name__ == '__main__':
         default='/data/hupba/Datasets/breakfast/hdf5/pooled-20-0.5b/',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
-
-    # parser.add_argument(
-    #     '-w',
-    #     '--class-weights-file',
-    #     type=str,
-    #     dest='class_weights_file',
-    #     default='./breakfast/class_weights.npy',
-    #     help=
-    #     'File (npy) containing a N-sized vector, where N number of classes (default: %(default)s)')
-
+    
     parser.add_argument(
         '-b',
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=16,
+        default=64,
         help=
         'Batch size (default: %(default)s)')
 
