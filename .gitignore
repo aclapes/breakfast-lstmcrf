@@ -1,3 +1,4 @@
+*.tfevents*
 *.meta
 *.data*
 *.index

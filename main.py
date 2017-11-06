@@ -3,11 +3,12 @@ import argparse
 import tensorflow as tf
 
 from pipeline_lstm import SimpleLstmPipeline
-from pipeline_lstm_ttbp import LstmPipeline
 from pipeline_crf import SimpleCrfPipeline
 from pipeline_lstmcrf import SimpleLstmcrfPipeline
 
 import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"]="2"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
@@ -20,7 +21,7 @@ if __name__ == '__main__':
         '--input-dir',
         type=str,
         dest='input_dir',
-        default='/data/datasets/breakfast/hdf5/pooled-20-0.5b/',
+        default='/data/hupba/Datasets/breakfast/hdf5/pooled-20-0.5b/',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -65,7 +66,7 @@ if __name__ == '__main__':
         '--num_epochs',
         type=int,
         dest='num_epochs',
-        default=200,
+        default=150,
         help=
         'Num epochs (default: %(default)s)')
 
@@ -97,7 +98,7 @@ if __name__ == '__main__':
         'Test data subset identifier (default: %(default)s)')
 
     parser.add_argument(
-        '-M',
+        '-m',
         '--model-type',
         type=str,
         dest='model_type',
@@ -144,6 +145,24 @@ if __name__ == '__main__':
         help=
         'GPU devices (default: %(default)s)')
 
+    parser.add_argument(
+        '-L',
+        '--logging-path',
+        type=str,
+        dest='logging_path',
+        default='/data/hupba/Datasets/breakfast/log/',
+        help=
+        'Tensorboard\'s logging path (default: %(default)s)')
+
+    parser.add_argument(
+        '-M',
+        '--models-path',
+        type=str,
+        dest='models_path',
+        default='/data/hupba/Datasets/breakfast/models/',
+        help=
+        'Tensorflow\'s models path (default: %(default)s)')
+
     args = parser.parse_args()
     print args
 
@@ -169,7 +188,8 @@ if __name__ == '__main__':
         m = SimpleLstmcrfPipeline(
             f_dataset,
             args.test_subset,
-            args.class_weights_file,
+            os.path.join(args.logging_path, 'lstmcrf', args.test_subset),
+            os.path.join(args.models_path, 'lstmcrf', args.test_subset),
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,

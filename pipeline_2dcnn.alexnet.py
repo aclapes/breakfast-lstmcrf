@@ -223,7 +223,7 @@ class Simple2DCnnModel(object):
                     fetches, feed_dict=feed_dict
                 )
 
-                print(' -> loss=%.5f, acc=%2.2f%%' % (vals['loss'], 100.0 * vals['acc']))
+                # print(' -> loss=%.5f, acc=%2.2f%%' % (vals['loss'], 100.0 * vals['acc']))
 
                 batch_loss.append(vals['loss'])
                 batch_accs.append(vals['acc'])
@@ -351,7 +351,7 @@ class Simple2DCnnPipeline(object):
             # Validation step
             loss_val, mof_val = self.val_model.run_epoch(session)
             if save_checkpoints and epoch_i % checkpoint_every_n == 0:
-                self.saver.save(session, '/data/datasets/breakfast/models/cnn-alexnet/cnn_alexnet-{}'.format(tvar_names),
+                self.saver.save(session, '/data/hupba/Datasets/breakfast/models/cnn-alexnet/cnn_alexnet-{}'.format(tvar_names),
                                 global_step=self.train_model.global_step, write_meta_graph=False)
 
     def run(self, num_epochs, tvar_names=None):
@@ -393,7 +393,7 @@ if __name__ == '__main__':
         '--input-dir',
         type=str,
         dest='input_dir',
-        default='/data/datasets/breakfast/images/',
+        default='/data/hupba/Datasets/breakfast/images/',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
 
@@ -411,7 +411,7 @@ if __name__ == '__main__':
         '--pretrain-weights-file',
         type=str,
         dest='pretrain_weights_file',
-        default='/data/datasets/bvlc_alexnet.npy',
+        default='/data/hupba/Datasets/bvlc_alexnet.npy',
         help=
         'File (npy) containing pretrain weights for AlexNet (default: %(default)s)')
 

@@ -1,4 +1,4 @@
-FROM nvidia/cuda:8.0-cudnn6-devel-ubuntu14.04
+FROM nvidia/cuda:8.0-cudnn6-runtime-ubuntu14.04
 MAINTAINER aclapes
 
 RUN echo "deb http://us.archive.ubuntu.com/ubuntu trusty main multiverse" >> /etc/apt/sources.list \
@@ -17,6 +17,7 @@ RUN echo "deb http://us.archive.ubuntu.com/ubuntu trusty main multiverse" >> /et
 	pkg-config \ 
 	libpng-dev \
 	zlib1g-dev \
+	unzip \
 	ssh \
 	openssh-server \ 
 	cmake yasm libjpeg-dev libjasper-dev libavcodec-dev libavformat-dev libswscale-dev libxine-dev gstreamer1.0 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libv4l-dev libtbb-dev libqt4-dev libgtk2.0-dev libfaac-dev libmp3lame-dev libopencore-amrnb-dev libopencore-amrwb-dev libtheora-dev libvorbis-dev libxvidcore-dev x264 v4l-utils \
@@ -28,14 +29,10 @@ RUN pip install --upgrade \
     imageio \
     h5py \
     jupyter==1.0.0 \
-    numpy==1.11.2 \
+    numpy \
     progressbar2==3.9.3 \
-    Theano==0.8.2 \
     youtube-dl \
-    tensorflow-gpu==1.4.0 \
-    git+https://github.com/albertomontesg/keras.git@improved-3d-ops
-
-RUN echo "[global]\ndevice=gpu\nfloatX=float32\noptimizer_including=cudnn\n\n[lib]\ncnmem=1\n\n[dnn]\nenabled=True" > .theanorc
+    tensorflow-gpu==1.4.0
 
 RUN mkdir opt/externals
 
