@@ -52,6 +52,7 @@ from __future__ import print_function
 
 import numpy as np
 
+import tensorflow as tf
 from tensorflow.python.framework import dtypes
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_array_ops
@@ -128,7 +129,7 @@ def crf_log_norm(inputs, sequence_lengths, transition_params):
 
   # Compute the alpha values in the forward algorithm in order to get the
   # partition function.
-  forward_cell = CrfForwardRnnCell(transition_params)
+  forward_cell = ScrfForwardRnnCell(transition_params)
   _, alphas = rnn.dynamic_rnn(
       cell=forward_cell,
       inputs=rest_of_input,
@@ -240,6 +241,60 @@ def crf_binary_score(tag_indices, sequence_lengths, transition_params):
 
 
 class CrfForwardRnnCell(rnn_cell.RNNCell):
+  """Computes the alpha values in a linear-chain CRF.
+
+  See http://www.cs.columbia.edu/~mcollins/fb.pdf for reference.
+  """
+
+  def __init__(self, transition_params):
+    """Initialize the CrfForwardRnnCell.
+
+    Args:
+      transition_params: A [num_tags, num_tags] matrix of binary potentials.
+          This matrix is expanded into a [1, num_tags, num_tags] in preparation
+          for the broadcast summation occurring within the cell.
+    """
+    self._transition_params = array_ops.expand_dims(transition_params, 0)
+    self._num_tags = transition_params.get_shape()[0].value
+
+  @property
+  def state_size(self):
+    return self._num_tags
+
+  @property
+  def output_size(self):
+    return self._num_tags
+
+  def __call__(self, inputs, state, scope=None):
+    """Build the CrfForwardRnnCell.
+
+    Args:
+      inputs: A [batch_size, num_tags] matrix of unary potentials.
+      state: A [batch_size, num_tags] matrix containing the previous alpha
+          values.
+      scope: Unused variable scope of this cell.
+
+    Returns:
+      new_alphas, new_alphas: A pair of [batch_size, num_tags] matrices
+          values containing the new alpha values.
+    """
+    state = array_ops.expand_dims(state, 2)
+
+    # This addition op broadcasts self._transitions_params along the zeroth
+    # dimension and state along the second dimension. This performs the
+    # multiplication of previous alpha values and the current binary potentials
+    # in log space.
+    transition_scores = state + self._transition_params
+    new_alphas = inputs + math_ops.reduce_logsumexp(transition_scores, [1])
+
+    # Both the state and the output of this RNN cell contain the alphas values.
+    # The output value is currently unused and simply satisfies the RNN API.
+    # This could be useful in the future if we need to compute marginal
+    # probabilities, which would require the accumulated alpha values at every
+    # time step.
+    return new_alphas, new_alphas
+
+class ScrfForwardRnnCell(rnn_cell.RNNCell):
   """Computes the alpha values in a linear-chain CRF.
 
   See http://www.cs.columbia.edu/~mcollins/fb.pdf for reference.

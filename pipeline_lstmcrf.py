@@ -333,16 +333,18 @@ class SimpleLstmcrfPipeline(object):
 
             self.init_op = tf.global_variables_initializer()
             # Add ops to save and restore all the variables.
-            self.saver = tf.train.Saver()
+            # self.saver = tf.train.Saver()
 
 
-    def run(self, gpu_options):
+    def run(self, gpu_options, restore_from_ckpt=None):
         np.set_printoptions(precision=2,linewidth=200)
         with tf.Session(graph=self.graph, config=tf.ConfigProto(gpu_options=gpu_options)) as session:
+            # if restore_from_ckpt is None:
+            #     restore_from_ckpt = tf.train.latest_checkpoint(self.output_models_path)
             # try:
             #     self.saver.restore(
             #         session,
-            #         tf.train.latest_checkpoint(self.output_models_path)
+            #         restore_from_ckpt
             #     )
             #     print 'Model restored'
             # except ValueError, e:
@@ -364,16 +366,15 @@ class SimpleLstmcrfPipeline(object):
                 loss_val, mof_val = self.val_model.run_epoch(session, e)
                 print('[Validation epoch] loss=%.5f, acc=%2.2f%%' % (loss_val, 100.0 * mof_val))
 
-                # if e+1 in set([10, 50, 100, 150, 200, self.num_epochs]):
+                if e+1 in set([10, 50, 100, 150, 200, 250, self.num_epochs]):
                     # Save the model
                     # self.saver.save(
                     #     session,
                     #     path.join(self.output_models_path, 'ckpt'),
                     #     global_step=e,
-                    #     write_meta_graph=(e+1 == self.num_epochs)
                     # )
                     # print 'Model saved'
 
-            loss_te, mof_te = self.te_model.run_epoch(session, e)
-            print('[Testing epoch] loss=%.5f, acc=%2.2f%%' % (loss_te, 100.0 * mof_te))
+                    loss_te, mof_te = self.te_model.run_epoch(session, e)
+                    print('[Testing epoch] loss=%.5f, acc=%2.2f%%' % (loss_te, 100.0 * mof_te))
 

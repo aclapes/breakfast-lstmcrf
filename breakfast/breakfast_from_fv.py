@@ -8,15 +8,21 @@ import time
 def import_labels(f):
     ''' Read from a file all the labels from it '''
     lines = f.readlines()
-    labels = []
-    i = 0
+    labels = [None]
     for l in lines:
-        t = l.split('\t')
-        assert int(t[0]) == i
-        label = t[1].split('\n')[0]
+        label = l.split('\n')[0]
         labels.append(label)
-        i += 1
     return labels
+
+def get_transitions(y, num_tags):
+    T = np.zeros((num_tags,num_tags), dtype=np.int32)
+    transitions = [0]  # dummy class id is 0
+    for i in range(len(y)):
+        if y[i] != transitions[-1]:
+            T[transitions[-1],y[i]] += 1
+            transitions.append(y[i])
+
+    return T, transitions
 
 def read_features(filepath, pool_op, win_size=20, overlap=.5):
     import csv
@@ -76,7 +82,10 @@ def generate_output(video_info, labels, win_size=20, overlap=.5):
         _, counts = np.unique(outs, return_counts=True)
         label = outs[np.argmax(counts)]
 
-        output = labels.index(label)
+        try:
+            output = labels.index(label)
+        except ValueError, e:
+            raise e
 
         instances.append(output)
 
@@ -118,7 +127,8 @@ def create(features_path, pool_op, pool_win_size, pool_win_ovl, pad_to_mul_of, i
 
     vid_fmt = h5py.special_dtype(vlen=np.dtype('float32'))
     lbl_fmt = h5py.special_dtype(vlen=np.dtype('int32'))
-    dt = np.dtype({'names': ['video_features', 'outputs'], 'formats': [vid_fmt, lbl_fmt]})
+    trs_fmt = h5py.special_dtype(vlen=np.dtype('int32'))
+    dt = np.dtype({'names': ['video_features', 'outputs', 'transitions'], 'formats': [vid_fmt, lbl_fmt, trs_fmt]})
 
     f_dataset.create_dataset(
         'dataset', (nb_videos,),
@@ -137,6 +147,9 @@ def create(features_path, pool_op, pool_win_size, pool_win_ovl, pad_to_mul_of, i
 
     num_features = None
 
+    T = np.zeros((len(labels),len(labels)), dtype=np.float32)
+    max_segments = 0
+
     for i,key in enumerate(videos):
         # Read data from videos and prepare the input format
 
@@ -147,6 +160,12 @@ def create(features_path, pool_op, pool_win_size, pool_win_ovl, pad_to_mul_of, i
         y = generate_output(videos_data[key], labels, win_size=pool_win_size, overlap=pool_win_ovl)
 
         video_features = np.concatenate([x, np.zeros((len(y)-x.shape[0],x.shape[1]))])
+
+        Ty, transitions = get_transitions(y, len(labels))
+        T += Ty  # update the general transition matrix
+
+        if len(transitions) > max_segments:
+            max_segments = len(transitions)
 
         ids, counts = np.unique(y, return_counts=True)
         for id,c in zip(ids,counts): class_counts[id] += c
@@ -162,14 +181,17 @@ def create(features_path, pool_op, pool_win_size, pool_win_ovl, pad_to_mul_of, i
         # Write data into HDF5
 
         f_dataset['dataset'][i] = (
-            video_features.flatten(), np.array(y)
+            video_features.flatten(), np.array(y), np.array(transitions)
         )
         f_dataset['subsets'][i] = videos_data[key]['subset']
         f_dataset['lengths'][i] = len(y)
 
+    T = T / np.sum(T,axis=1)[:,np.newaxis]
+    f_dataset.create_dataset('transition_matrix', data=T)
 
     f_dataset.create_dataset('class_weights', data=(np.max(class_counts)/class_counts))
 
+    f_dataset.attrs['max_segments'] = max_segments
     # Save some additional attributes
     f_dataset.attrs['num_features'] = num_features
     f_dataset.attrs['max_length'] = 1000
@@ -241,7 +263,7 @@ if __name__ == '__main__':
         '--pool-win-ovl',
         type=float,
         dest='pool_win_ovl',
-        default=0.5,
+        default=0,
         help=
         'Pooling window overlap (default: %(default)s)')
 
@@ -259,7 +281,7 @@ if __name__ == '__main__':
         '--output-dir',
         type=str,
         dest='output_dir',
-        default='/data/hupba/Datasets/breakfast/hdf5/pooled-1-0b/',
+        default='/data/hupba/Datasets/breakfast/hdf5/pooled-20-0c/',
         help=
         'Directory where hdf5 files will be generated (default: %(default)s)')
 

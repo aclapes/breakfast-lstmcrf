@@ -1,48 +1,48 @@
-0	none
-1	fry_egg
-2	add_saltnpepper
-3	cut_fruit
-4	pour_milk
-5	put_fruit2bowl
-6	put_toppingOnTop
-7	pour_water
-8	spoon_flour
-9	stir_milk
-10	stir_coffee
-11	pour_cereals
-12	butter_pan
-13	put_egg2plate
-14	take_glass
-15	pour_sugar
-16	take_butter
-17	peel_fruit
-18	take_knife
-19	stirfry_egg
-20	pour_oil
-21	spoon_powder
-22	pour_flour
-23	put_pancake2plate
-24	stir_fruit
-25	fry_pancake
-26	pour_dough2pan
-27	take_cup
-28	stir_egg
-29	take_eggs
-30	put_bunTogether
-31	pour_coffee
-32	smear_butter
-33	squeeze_orange
-34	take_bowl
-35	cut_bun
-36	stir_tea
-37	take_squeezer
-38	pour_juice
-39	stir_cereals
-40	pour_egg2pan
-41	take_topping
-42	add_teabag
-43	crack_egg
-44	take_plate
-45	cut_orange
-46	stir_dough
-47	spoon_sugar
+SIL
+fry_egg
+add_saltnpepper
+peel_fruit
+cut_fruit
+pour_milk
+put_fruit2bowl
+put_toppingOnTop
+pour_water
+spoon_flour
+stir_coffee
+pour_cereals
+butter_pan
+put_egg2plate
+take_glass
+pour_sugar
+take_butter
+stir_milk
+take_knife
+stirfry_egg
+pour_oil
+spoon_powder
+pour_flour
+put_pancake2plate
+stir_fruit
+fry_pancake
+pour_dough2pan
+take_cup
+stir_egg
+take_eggs
+put_bunTogether
+pour_coffee
+smear_butter
+squeeze_orange
+take_bowl
+cut_bun
+stir_tea
+take_squeezer
+pour_juice
+stir_cereals
+pour_egg2pan
+take_topping
+add_teabag
+crack_egg
+take_plate
+cut_orange
+stir_dough
+spoon_sugar

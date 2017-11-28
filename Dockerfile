@@ -30,6 +30,7 @@ RUN pip install --upgrade \
     h5py \
     jupyter==1.0.0 \
     numpy \
+    scipy \
     progressbar2==3.9.3 \
     youtube-dl \
     tensorflow-gpu==1.4.0

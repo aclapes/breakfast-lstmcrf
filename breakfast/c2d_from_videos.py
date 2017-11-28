@@ -96,8 +96,10 @@ def create(info_file, labels_file, frame_size, action_labels, output_dir, fskip=
         # uncomment if want to merge validation and testing
         # ---
         for key, value in videos_data.iteritems():
-            if videos_data[key]['subset'] == 'validation':
+            if videos_data[key]['subset'] == 's1':
                 videos_data[key]['subset'] = 'training'
+            else:
+                videos_data[key]['subset'] = 'testing'
         # ---
 
     with open(labels_file, 'r') as f:
@@ -268,15 +270,6 @@ if __name__ == '__main__':
         'File (txt) where labels are listed (default: %(default)s)')
 
     parser.add_argument(
-        '-ws',
-        '--win-size',
-        type=int,
-        dest='win_size',
-        default=16,
-        help=
-        'Window size (default: %(default)s)')
-
-    parser.add_argument(
         '-s',
         '--frame-size',
         nargs='+',
@@ -291,7 +284,7 @@ if __name__ == '__main__':
         '--output-dir',
         type=str,
         dest='output_dir',
-        default='/data/datasets/breakfast/images/',
+        default='/data/hupba/Datasets/breakfast/images/',
         help=
         'Directory where 3 hdf5 files will be generated (training / validation / testing) (default: %(default)s)')
 

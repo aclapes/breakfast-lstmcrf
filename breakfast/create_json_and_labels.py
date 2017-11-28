@@ -79,13 +79,12 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
                         st, end = float(st)-1, float(end)-1
                         action_durations.setdefault(name, []).append(end-(st-1)+1)
                         # build annotation
-                        label = name if name != 'SIL' else 'none'
                         json_content[video_filename]['annotations'].append(
                             dict(segment=[float(st)/fps, (float(end)+1)/fps],
-                                 label=label)
+                                 label=name)
                         )
                         # keep track of action labels
-                        action_labels.setdefault(label,None)
+                        action_labels.setdefault(name,None)
 
     # not saving this, only for debugging purposes
     # ---
@@ -101,10 +100,10 @@ def create_json_and_labels(path_videos, path_segmentation, output_labels_file, o
         json.dump(json_content, f, indent=2)
 
     with open(output_labels_file, 'w') as f:
-        del action_labels['none']
-        f.write('0\tnone\n')
+        del action_labels['SIL']
+        f.write('SIL\n')
         for i,label in enumerate(action_labels.keys()):
-            f.write('{}\t{}\n'.format(i+1,label))
+            f.write('{}\n'.format(label))
 
     print('Files saved')
 
@@ -119,7 +118,7 @@ if __name__ == "__main__":
         '--videos-dir',
         type=str,
         dest='videos_dir',
-        default='/data/datasets/breakfast/vid/',
+        default='/data/hupba/Datasets/breakfast/vid/',
         help=
         'Directory containing the breakfast data (default: %(default)s)')
 
@@ -128,7 +127,7 @@ if __name__ == "__main__":
         '--segmentations-dir',
         type=str,
         dest='segmentations_dir',
-        default='/data/datasets/breakfast/segmentation_coarse/',
+        default='/data/hupba/Datasets/breakfast/segmentation_coarse/',
         help=
         'Directory containing the breakfast segmentation files (default: %(default)s)')
 
@@ -157,5 +156,3 @@ if __name__ == "__main__":
                            args.segmentations_dir,
                            args.labels_file,
                            args.info_file)
-
-    quit()

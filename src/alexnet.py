@@ -23,7 +23,7 @@ import numpy as np
 
 
 class AlexNet(object):
-    def __init__(self, x, keep_prob, num_classes, skip_layer, train_layer,
+    def __init__(self, x, keep_prob, num_classes, skip_layer,
                  weights_path='DEFAULT'):
         """
 
@@ -31,7 +31,6 @@ class AlexNet(object):
         :param keep_prob:
         :param num_classes:
         :param skip_layer: specifies the layers that will not be load from pretrained weights
-        :param train_layer : specifies which layers are to be trained (has to contain at least the skipped layers)
         :param weights_path:
         """
 
@@ -40,9 +39,6 @@ class AlexNet(object):
         self.NUM_CLASSES = num_classes
         self.KEEP_PROB = keep_prob
         self.SKIP_LAYER = skip_layer
-        self.TRAIN_LAYER = train_layer
-        for op_name in self.SKIP_LAYER:
-            assert op_name in self.TRAIN_LAYER
 
         if weights_path == 'DEFAULT':
             self.WEIGHTS_PATH = 'bvlc_alexnet.npy'
@@ -110,12 +106,12 @@ class AlexNet(object):
 
                         # Biases
                         if len(data.shape) == 1:
-                            var = tf.get_variable('biases', trainable=False)
+                            var = tf.get_variable('biases', trainable=True)
                             session.run(var.assign(data))
 
                         # Weights
                         else:
-                            var = tf.get_variable('weights', trainable=False)
+                            var = tf.get_variable('weights', trainable=True)
                             session.run(var.assign(data))
 
 

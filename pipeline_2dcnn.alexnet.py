@@ -16,41 +16,46 @@ tf.logging.set_verbosity(tf.logging.ERROR)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = "3"
 
 
-def preprocessing(images, labels, batch_size):
-    """
-    Preprocessing batch function called during tf.data.Dataset.from_generator().
-    :param images:
-    :param labels:
-    :return:
-    """
+IMAGENET_MEAN = [123.68, 116.779, 103.939]  # rgb
 
-    # Random crops (glimpses)
-    # ---
-    height = width = 227
-
-    # compute offsets
-    # batch_size = tf.shape(images)[0]
-    x = tf.random_normal([3 * batch_size])
-    y = tf.random_normal([3 * batch_size])
-    xx = tf.boolean_mask(x, tf.logical_and(tf.greater_equal(x, -1), tf.less_equal(x, 1)))
-    yy = tf.boolean_mask(y, tf.logical_and(tf.greater_equal(y, -1), tf.less_equal(y, 1)))
-    offsets = tf.concat([tf.expand_dims(tf.slice(xx, [0], [batch_size]), axis=-1),
-                         tf.expand_dims(tf.slice(yy, [0], [batch_size]), axis=-1)],
-                        axis=1)
-
-    images = tf.image.extract_glimpse(
-        images,
-        [height, width],
-        offsets,
-        uniform_noise=True
-    )
+def preprocessing(images):
 
     # Left-right clipping of crops
     # ---
     images_stack = tf.unstack(images, axis=0)
     images = tf.stack([tf.image.random_flip_left_right(image) for image in images_stack], axis=0)
 
-    return images, labels
+    return images
+
+
+def extract_crops(images, height, width, batch_size, n_per_image=1):
+    crops_stack = []
+
+    # Random crops (glimpses)
+    # ---
+    for i in range(n_per_image):
+        # compute offsets
+        x = tf.random_normal([100 * batch_size])
+        y = tf.random_normal([100 * batch_size])
+        x_inrange = tf.boolean_mask(x, tf.logical_and(tf.greater_equal(x, -1), tf.less_equal(x, 1)))
+        y_inrange = tf.boolean_mask(y, tf.logical_and(tf.greater_equal(y, -1), tf.less_equal(y, 1)))
+        offsets = tf.concat([tf.expand_dims(tf.slice(x_inrange, [0], [batch_size]), axis=-1),
+                             tf.expand_dims(tf.slice(y_inrange, [0], [batch_size]), axis=-1)],
+                            axis=1)
+
+        glimpses = tf.image.extract_glimpse(
+            images,
+            [height, width],
+            offsets,
+            uniform_noise=True
+        )
+
+        crops_stack.append(tf.expand_dims(glimpses,1))
+
+    crops = tf.concat(crops_stack, axis=1)
+    crops = tf.reshape(crops, [batch_size*n_per_image,height,width,3])
+
+    return crops
 
 
 class Simple2DCnnModel(object):
@@ -59,9 +64,6 @@ class Simple2DCnnModel(object):
         self.input_data = input_data
         self.is_training = is_training
         self.pretrain_weights = pretrain_weights
-
-        skip_layers = ['fc8']
-        train_layers = ['fc7','fc8']
 
         #
         # # Graph construction
@@ -74,22 +76,44 @@ class Simple2DCnnModel(object):
             end = self.config['batch_size']*(n//self.config['batch_size']) # discard last batch
             perm = perm[:end]
             for idx in perm:
-                yield (self.input_data[idx]['image'].astype(np.float32),  self.input_data[idx]['label'])
-            return
+                image = self.input_data[idx]['image']
+                yield image.astype(np.float32),  self.input_data[idx]['label']
+
+
+        # def gen_batch():
+        #     """ A simple data iterator """
+        #     n =  self.input_data.shape[0]
+        #     perm = np.random.permutation(n)
+        #     n_batches = int(np.ceil(float(len(perm))/self.config['batch_size']))
+        #     for i in range(n_batches):
+        #         images_b = []
+        #         labels_b = []
+        #         batch_size = min(self.config['batch_size'], n-i*self.config['batch_size'])
+        #         for idx in range(batch_size):
+        #             images_b.append(self.input_data[idx]['image'].astype(np.float32))
+        #             labels_b.append(self.input_data[idx]['label'])
+        #         yield np.array(images_b), np.array(labels_b)
+        #
+        # f_gen = gen_batch()
+        # a,b = f_gen.next()
+        # preprocessing_test(a,b,self.config['batch_size'])
 
         with tf.device('/cpu:0'):
             ds = (
                 tf.data.Dataset.from_generator(gen,
                                                (tf.float32, tf.int32),
                                                (tf.TensorShape([None,None,3]), tf.TensorShape([])))
-                .batch(self.config['batch_size'])
-                .map(lambda images, labels: preprocessing(images, labels, self.config['batch_size']))
+                .batch(self.config['batch_size'])  #.map(lambda images, labels: preprocessing(images, labels, self.config['batch_size']))
                 .prefetch(4)
+                .repeat()
             )
 
-            self.iterator = ds.make_initializable_iterator()
+            self.iterator = ds.make_one_shot_iterator()
             x_batch, y_batch = self.iterator.get_next()
 
+        x_batch = extract_crops(x_batch, 112, 112, self.config['batch_size'], n_per_image=self.config['num_crops'])
+        if is_training:
+            x_batch = preprocessing(x_batch)
 
         # # Features, output labels, and binary mask of valid timesteps
         # self.x_batch = tf.placeholder(tf.float32, shape=[None] + list(frame_dims))
@@ -128,20 +152,30 @@ class Simple2DCnnModel(object):
         else:
             raise NotImplementedError('Either specify "sgd" or "adam" optimizer type.')
 
+        centering = tf.constant(IMAGENET_MEAN, dtype=tf.float32)
+
         # input to cnn
         # vgg = vgg19.Vgg19(self.pretrain_weights, fc8_dict=dict(size=num_classes, name='fc8'))
         # vgg.build(x_batch[g*m:(g+1)*m] / 255.0, train_mode=tf.constant(self.is_training, dtype=tf.bool))
+
+        x_batch = tf.subtract(x_batch, IMAGENET_MEAN)  # center images
+        x_batch = tf.reverse(x_batch, axis=[-1])  # rgb -> bgr (on alexnet)
+        x_batch = tf.image.resize_images(x_batch, [227, 227])  # alexnet input size
+
         self.alexnet = AlexNet(
             x_batch,
             1.-self.dropout,
             self.config['num_classes'],
-            skip_layers,
-            train_layers,
+            ['fc8'],
             weights_path=self.pretrain_weights
         )
 
         # output from cnn
         logits = self.alexnet.fc8
+
+        if self.config['num_crops'] > 1:
+            logits = tf.reshape(logits, [-1, self.config['num_crops'], self.config['num_classes']])
+            logits = tf.reduce_max(logits, axis=1)
 
         with tf.name_scope("cross_entropy"):
             # Class weighting
@@ -156,15 +190,16 @@ class Simple2DCnnModel(object):
 
         with tf.name_scope('training'):
             self.train_conv5_op = self.get_training_subgraph(['conv5', 'fc6', 'fc7', 'fc8'])
-            self.train_fc_all_op = self.get_training_subgraph(['fc6','fc7','fc8'])
-            self.train_fc_last_two_op = self.get_training_subgraph(['fc7','fc8'])
-            self.train_fc_last_op = self.get_training_subgraph(['fc8'])
+            self.train_fc6_op = self.get_training_subgraph(['fc6','fc7','fc8'])
+            self.train_fc7_op = self.get_training_subgraph(['fc7','fc8'])
+            self.train_fc8_op = self.get_training_subgraph(['fc8'])
 
         with tf.name_scope("accuracy"):
             preds = (tf.argmax(logits, 1, output_type=tf.int32))
             equality = tf.equal(preds, y_batch)
 
             self.acc = tf.reduce_mean(tf.cast(equality, tf.float32))
+
 
     def get_training_subgraph(self, train_layers):
         var_list = [v for v in tf.trainable_variables() if v.name.split('/')[1] in train_layers]
@@ -195,25 +230,27 @@ class Simple2DCnnModel(object):
         }
 
         feed_dict = {
-            self.learning_rate: 1e-5,  # 10x smaller than original learning rate (1e-4)
+            self.learning_rate: self.config['learn_rate'],  # same as original learning rate or 10x smaller (would be 1e-5)
             self.dropout: (self.config['drop_prob'] if self.is_training else 0)
         }
 
         if self.is_training:
-            if tvar_names == 'TRAIN_FC_ALL':
-                fetches['train_op'] = self.train_fc_all_op
-            elif tvar_names == 'TRAIN_FC_LAST_TWO':
-                fetches['train_op'] = self.train_fc_last_two_op
-            elif tvar_names == 'TRAIN_FC_LAST':
-                fetches['train_op'] = self.train_fc_last_op
-            else:
+            if 'conv5' in tvar_names:
                 fetches['train_op'] = self.train_conv5_op
+            elif 'fc6' in tvar_names:
+                fetches['train_op'] = self.train_fc6_op
+            elif 'fc7' in tvar_names:
+                fetches['train_op'] = self.train_fc7_op
+            elif 'fc8' in tvar_names:
+                fetches['train_op'] = self.train_fc8_op
+            else:
+                raise ValueError("No valid training layer specified (from 'conv5' and above).")
 
         batch_loss = []
         batch_accs = []
 
         num_batches = int(np.ceil(self.config['num_instances'] // self.config['batch_size']))
-        session.run(self.iterator.initializer)
+        # session.run(self.iterator.initializer)
         try:
             bar = progressbar.ProgressBar(max_value=num_batches)
             for batch_i in range(num_batches):
@@ -224,6 +261,7 @@ class Simple2DCnnModel(object):
                 )
 
                 # print(' -> loss=%.5f, acc=%2.2f%%' % (vals['loss'], 100.0 * vals['acc']))
+                # print vals['perm_indices']
 
                 batch_loss.append(vals['loss'])
                 batch_accs.append(vals['acc'])
@@ -271,7 +309,8 @@ class Simple2DCnnPipeline(object):
             drop_prob = drop_prob,
             decay_rate = decay_rate,
             learn_rate = learn_rate,
-            clip_norm = clip_norm
+            clip_norm = clip_norm,
+            num_crops = 1
         )
 
         # Alternative:
@@ -295,11 +334,14 @@ class Simple2DCnnPipeline(object):
         val_config = train_config.copy()
         val_config['drop_prob'] = 0.
         val_config['num_instances'] = val['/dataset'].shape[0]
+        val_config['batch_size'] = 16
+        val_config['num_crops'] = 16
 
         test_config = train_config.copy()
         test_config['drop_prob'] = 0.
         test_config['num_instances'] = test['/dataset'].shape[0]
         test_config['batch_size'] = 1
+        test_config['num_crops'] = 16
 
         # load pre-trained weights and remove output layer (which has de #classes from ImageNet)
         # pretrain_weights = np.load('/data/datasets/vgg19.npy', encoding='latin1').item()
@@ -342,19 +384,17 @@ class Simple2DCnnPipeline(object):
             with tf.variable_scope('Model'):
                 self.train_model.load_initial_weights(session)
 
-        self.train_model.reset_global_step(session)
-
         for epoch_i in range(num_epochs):
             print('EPOCH %d/%d' % (epoch_i+1, self.num_epochs))
             # Train
             loss_train, mof_train = self.train_model.run_epoch(session, tvar_names)
             # Validation step
             loss_val, mof_val = self.val_model.run_epoch(session)
-            if save_checkpoints and epoch_i % checkpoint_every_n == 0:
-                self.saver.save(session, '/data/hupba/Datasets/breakfast/models/cnn-alexnet/cnn_alexnet-{}'.format(tvar_names),
-                                global_step=self.train_model.global_step, write_meta_graph=False)
+            # if save_checkpoints and epoch_i > 0 and epoch_i % checkpoint_every_n == 0:
+            #     self.saver.save(session, '/data/hupba/Datasets/breakfast/models/cnn-alexnet/cnn_alexnet-{}'.format(tvar_names),
+            #                     global_step=epoch_i, write_meta_graph=False)
 
-    def run(self, num_epochs, tvar_names=None):
+    def run(self, num_epochs, tvar_names):
         """
         ...
         :param num_epochs:
@@ -367,19 +407,15 @@ class Simple2DCnnPipeline(object):
 
         # run a session in a python's context manager ("with" clause)
         with tf.Session(graph=self.graph, config=config_proto) as session:
-            try:
-                # do we already have a model checkpoint?
-                self.saver.restore(session, tf.train.latest_checkpoint('/data/datasets/breakfast/models/cnn-alexnet/'))
-                pretrain = False  # if so, do not start on imagenet pretrained weights
-            except:
-                pretrain = True
-                session.run(self.init_op)
+            # try:
+            #     # do we already have a model checkpoint?
+            #     self.saver.restore(session, tf.train.latest_checkpoint('/data/hupba/Datasets/breakfast/models/cnn-alexnet/'))
+            #     pretrain = False  # if so, do not start on imagenet pretrained weights
+            # except:
+            pretrain = True
+            session.run(self.init_op)
 
-            # if tvar_names == 'TRAIN_FC_CASCADE':
-                # self._run(session, int((1/3.)*num_epochs), 'TRAIN_FC_LAST', pretrain=pretrain, save_checkpoints=True, checkpoint_every_n=5)
-                # self._run(session, int((2/3.)*num_epochs), 'TRAIN_FC_LAST_TWO', pretrain=False, save_checkpoints=True, checkpoint_every_n=5)
-            # else:
-            self._run(session, num_epochs, tvar_names, pretrain=pretrain, save_checkpoints=True, checkpoint_every_n=5)
+            self._run(session, num_epochs, tvar_names, pretrain=pretrain, save_checkpoints=True, checkpoint_every_n=10)
 
 
 if __name__ == '__main__':
@@ -420,7 +456,7 @@ if __name__ == '__main__':
         '--batch-size',
         type=int,
         dest='batch_size',
-        default=64,
+        default=1024,
         help=
         'Batch size (default: %(default)s)')
 
@@ -429,7 +465,7 @@ if __name__ == '__main__':
         '--learning-rate',
         type=float,
         dest='learn_rate',
-        default=0.01,
+        default=1e-5,
         help=
         'Starting learning rate. It decays after 100 and 1000 epochs by a factor specified by --decay-rate argument (default: %(default)s)')
 
@@ -455,10 +491,10 @@ if __name__ == '__main__':
         '-v',
         '--trainable-vars',
         type=str,
-        dest='tvar_names' ,
-        default='',
+        dest='tvar_names',
+        default='conv5',
         help=
-        '"TRAIN_FC_LAST", "TRAIN_FC_ALL", "TRAIN_FC_CASCADE" or "" to train all layers (default: %(default)s)')
+        'List of layers to train (default: %(default)s)')
 
     parser.add_argument(
         '-ot',
@@ -492,7 +528,7 @@ if __name__ == '__main__':
         '--gpu-memory',
         type=float,
         dest='gpu_memory',
-        default=0.75,
+        default=0.95,
         help=
         'GPU memory to reserve (default: %(default)s)')
 

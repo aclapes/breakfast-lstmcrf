@@ -4,11 +4,14 @@ import tensorflow as tf
 
 from pipeline_lstm import SimpleLstmPipeline
 from pipeline_crf import SimpleCrfPipeline
+from pipeline_scrf import SimpleScrfPipeline
 from pipeline_lstmcrf import SimpleLstmcrfPipeline
+from pipeline_lstmscrf import SimpleLstmScrfPipeline
+
 
 import os
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"]="2"
+# os.environ["TF_CPP_MIN_LOG_LEVEL"]="0"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform labelling of sequences using a LSTMCRF model.')
@@ -21,10 +24,10 @@ if __name__ == '__main__':
         '--input-dir',
         type=str,
         dest='input_dir',
-        default='/data/hupba/Datasets/breakfast/hdf5/pooled-20-0.5b/',
+        default='/data/hupba/Datasets/breakfast/hdf5/pooled-20-0c/',
         help=
         'Dataset in hdf5 format (default: %(default)s)')
-    
+
     parser.add_argument(
         '-b',
         '--batch-size',
@@ -105,7 +108,7 @@ if __name__ == '__main__':
         '--hidden-size',
         type=int,
         dest='hidden_size',
-        default=512,
+        default=128,
         help=
         'Hidden size (default: %(default)s)')
 
@@ -181,6 +184,66 @@ if __name__ == '__main__':
             args.test_subset,
             os.path.join(args.logging_path, 'lstmcrf', args.test_subset),
             os.path.join(args.models_path, 'lstmcrf', args.test_subset),
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'lstm':
+        m = SimpleLstmPipeline(
+            f_dataset,
+            args.test_subset,
+            os.path.join(args.logging_path, 'lstm', args.test_subset),
+            os.path.join(args.models_path, 'lstm', args.test_subset),
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'crf':
+        m = SimpleCrfPipeline(
+            f_dataset,
+            args.test_subset,
+            os.path.join(args.logging_path, 'crf', args.test_subset),
+            os.path.join(args.models_path, 'crf', args.test_subset),
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'scrf':
+        m = SimpleScrfPipeline(
+            f_dataset,
+            args.test_subset,
+            os.path.join(args.logging_path, 'scrf', args.test_subset),
+            os.path.join(args.models_path, 'scrf', args.test_subset),
+            batch_size=args.batch_size,
+            learn_rate=args.learn_rate,
+            decay_rate=args.decay_rate,
+            num_epochs=args.num_epochs,
+            hidden_size=args.hidden_size,
+            drop_prob=args.drop_prob,
+            optimizer_type=args.optimizer_type,
+            clip_norm=args.clip_norm
+        )
+    elif args.model_type == 'lstmscrf':
+        m = SimpleLstmScrfPipeline(
+            f_dataset,
+            args.test_subset,
+            os.path.join(args.logging_path, 'lstmscrf', args.test_subset),
+            os.path.join(args.models_path, 'lstmscrf', args.test_subset),
             batch_size=args.batch_size,
             learn_rate=args.learn_rate,
             decay_rate=args.decay_rate,
